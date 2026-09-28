@@ -1,4 +1,5 @@
 import { streamChat } from "@/lib/llm";
+import { CATALOG } from "@/lib/products";
 import {
   buildQuoteContext,
   fallbackIntent,
@@ -9,6 +10,8 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** 平台函数时长上限，见 analyze 路由同名注释 */
+export const maxDuration = 60;
 
 function badRequest(message: string) {
   return Response.json({ error: message }, { status: 400 });
@@ -73,11 +76,28 @@ export async function POST(request: Request) {
     return badRequest("draft 与 currentQuote 至少要有一个。");
   }
 
+  // 意图来源优先级：
+  //   1. 前端回传的结构化 intent（最可靠，来自 analyze 那一步）
+  //   2. 从中文询盘原文规则解析
+  //   3. 从已有报价单兜底解析 —— 让"只传 currentQuote + instruction"的改价调用也能成立
+  //      （此前第 3 条缺失，改价调用会直接 400，与函数上方文档写明的契约不符）
+  const explicit = coerceIntent(body.intent);
   const intent =
-    coerceIntent(body.intent) ?? (draft.trim() ? fallbackIntent(draft) : null);
-  if (!intent) return badRequest("无法确定询盘意图。");
+    explicit ??
+    (draft.trim() ? fallbackIntent(draft) : null) ??
+    (currentQuote ? fallbackIntent(currentQuote) : null);
+  if (!intent) {
+    return badRequest("无法确定询盘意图：draft 与 currentQuote 至少要有一个。");
+  }
 
-  const ctx = buildQuoteContext(intent);
+  // 走到第 3 条时，机型/品类是从英文报价单猜的，基本不可靠；
+  // 此时把整个产品库都给模型当价格来源，避免只检索到几个不相干的 SKU。
+  const reliableIntent = Boolean(explicit) || Boolean(draft.trim());
+  const ctx = buildQuoteContext(
+    intent,
+    undefined,
+    reliableIntent ? 3 : CATALOG.length
+  );
 
   const messages =
     currentQuote && instruction
@@ -85,7 +105,12 @@ export async function POST(request: Request) {
       : quoteMessages(ctx);
 
   try {
-    const stream = await streamChat(messages, { temperature: 0.35, maxTokens: 3000 });
+    const stream = await streamChat(messages, {
+      temperature: 0.35,
+      maxTokens: 2000,
+      timeoutMs: 25000,
+      totalMs: 55000,
+    });
     return new Response(stream, {
       headers: {
         "Content-Type": "text/plain; charset=utf-8",

@@ -18,6 +18,7 @@ import {
   type WritingIntent,
 } from "@/lib/intent";
 import { useSpeechRecognition } from "@/lib/useSpeechRecognition";
+import { useAssemblyAIStream } from "@/lib/useAssemblyAIStream";
 import { mergeHistories, type HistoryItem } from "@/lib/historyStore";
 
 interface ProviderInfo {
@@ -123,7 +124,26 @@ export default function Home() {
     [type, tone, length, lang]
   );
 
-  const speech = useSpeechRecognition("zh-CN");
+  // 转写引擎：优先 AssemblyAI Realtime STT，任一环节不可用则降级浏览器 Web Speech。
+  // 两个 hook 接口完全一致，所以下游逻辑一行都不用分叉。
+  const aai = useAssemblyAIStream();
+  const webSpeech = useSpeechRecognition("zh-CN");
+  const [engine, setEngine] = useState<"aai" | "web">("web");
+  useEffect(() => {
+    let alive = true;
+    fetch("/api/aai-token?check=1", { cache: "no-store" })
+      .then((r) => r.json() as Promise<{ available?: boolean }>)
+      .then((d) => {
+        if (alive && d.available && aai.supported) setEngine("aai");
+      })
+      .catch(() => {
+        /* 探测失败 → 保持降级，Demo 不能开天窗 */
+      });
+    return () => {
+      alive = false;
+    };
+  }, [aai.supported]);
+  const speech = engine === "aai" ? aai : webSpeech;
   const prevTranscript = useRef("");
   // 语音识别：已确认文本实时追加进草稿；停止时把临时文本一并补上
   useEffect(() => {
@@ -864,8 +884,20 @@ export default function Home() {
                 <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
                   草稿 / 口述内容
                 </label>
-                {speech.supported ? (
-                  <span className="text-xs text-zinc-400">🎙 中文语音实时转写</span>
+                {engine === "aai" ? (
+                  <span
+                    className="text-xs text-emerald-600"
+                    title="AssemblyAI Realtime STT"
+                  >
+                    🎙 AssemblyAI 实时转写
+                  </span>
+                ) : speech.supported ? (
+                  <span
+                    className="text-xs text-zinc-400"
+                    title={aai.error ?? "未配置 ASSEMBLYAI_API_KEY，已降级为浏览器语音"}
+                  >
+                    🎙 浏览器语音转写（降级）
+                  </span>
                 ) : (
                   <span
                     className="text-xs text-amber-600"

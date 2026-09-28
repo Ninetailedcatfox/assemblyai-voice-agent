@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:local": "node scripts/fresh-build.mjs && next build",
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run"

@@ -649,12 +649,12 @@ export default function Home() {
 
   const stageDot = (status: StageStatus) =>
     status === "done"
-      ? "bg-emerald-500"
+      ? "bg-ok"
       : status === "running"
-      ? "bg-indigo-500 animate-pulse"
+      ? "bg-accent animate-pulse"
       : status === "error"
-      ? "bg-red-500"
-      : "bg-zinc-300";
+      ? "bg-danger"
+      : "bg-line-strong";
 
   const trackSelection = (el: HTMLTextAreaElement | null) => {
     if (!el) return;
@@ -673,41 +673,64 @@ export default function Home() {
 
   return (
     <>
-      <div className="no-print flex h-screen flex-col bg-gradient-to-br from-zinc-100 via-indigo-50 to-violet-50 font-sans text-zinc-900">
-        <header className="flex shrink-0 items-center justify-between border-b border-zinc-200 bg-white/80 px-5 py-3 backdrop-blur">
-          <div className="flex items-baseline gap-3">
-            <h1 className="bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-lg font-bold tracking-tight text-transparent">
+      <div
+        className="no-print flex h-screen flex-col font-sans text-ink"
+        style={{
+          background:
+            "radial-gradient(1100px 520px at 8% -10%, color-mix(in srgb, var(--accent) 13%, transparent), transparent 70%), var(--bg)",
+        }}
+      >
+        <header className="flex shrink-0 items-center justify-between gap-3 border-b border-line bg-surface/80 px-5 py-3 backdrop-blur">
+          <div className="flex min-w-0 items-baseline gap-3">
+            <h1
+              className="text-lg font-bold tracking-tight"
+              style={{
+                background:
+                  "linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 40%, #22d3ee))",
+                WebkitBackgroundClip: "text",
+                backgroundClip: "text",
+                color: "transparent",
+              }}
+            >
               AI 写作工作台
             </h1>
-            <span className="text-xs text-zinc-400">说一段话 → 查资料 → 透明成稿</span>
+            <span className="truncate text-xs text-faint">说一段话 → 查资料 → 透明成稿</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/agent"
-              className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100"
-            >
-              🎧 语音报价 Agent
-            </Link>
-            <Link
-              href="/trade"
-              className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
-            >
-              🌐 外贸模式
-            </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            <nav className="flex items-center gap-0.5 card-2 p-0.5">
+              <Link
+                href="/agent"
+                className="rounded-[0.55rem] px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink-2"
+              >
+                语音 Agent
+              </Link>
+              <Link
+                href="/trade"
+                className="rounded-[0.55rem] px-2.5 py-1 text-xs font-medium text-muted transition-colors hover:text-ink-2"
+              >
+                外贸模式
+              </Link>
+              <span
+                aria-current="page"
+                className="rounded-[0.55rem] bg-raised px-2.5 py-1 text-xs font-medium text-ink shadow-sm"
+              >
+                写作工作台
+              </span>
+            </nav>
             {searchEnabled && (
-              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
+              <span className="rounded-full bg-ok-soft px-3 py-1 text-xs text-ok">
                 🔍 检索增强已启用
               </span>
             )}
             {providers.length === 0 ? (
-              <span className="rounded-full bg-amber-50 px-3 py-1 text-xs text-amber-700">
+              <span className="rounded-full bg-warn-soft px-3 py-1 text-xs text-warn">
                 未配置 API Key
               </span>
             ) : (
               <select
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
-                className="rounded-full border border-zinc-200 bg-white px-3 py-1 text-xs text-zinc-600"
+                className="rounded-full border border-line bg-surface px-3 py-1 text-xs text-muted"
               >
                 {providers.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -720,12 +743,12 @@ export default function Home() {
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col lg:flex-row">
-          <aside className="flex w-full shrink-0 flex-col gap-4 border-b border-zinc-200 bg-white/70 p-4 lg:w-72 lg:border-b-0 lg:border-r">
+          <aside className="flex w-full shrink-0 flex-col gap-4 border-b border-line bg-surface/70 p-4 lg:w-72 lg:border-b-0 lg:border-r">
             <div>
-              <label className="mb-1 flex items-center justify-between text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <label className="mb-1 flex items-center justify-between text-xs font-medium uppercase tracking-wide text-muted">
                 写作类型
                 {intent && !touchedKeys.has("type") && (
-                  <span className="rounded bg-violet-100 px-1.5 text-[10px] normal-case text-violet-600">
+                  <span className="rounded bg-accent-soft px-1.5 text-[10px] normal-case text-accent">
                     ✨ AI 识别
                   </span>
                 )}
@@ -736,7 +759,7 @@ export default function Home() {
                   markTouched("type");
                   setType(e.target.value);
                 }}
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm"
               >
                 {typeOptions.map((t) => (
                   <option key={t} value={t}>
@@ -748,7 +771,7 @@ export default function Home() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
                   语气
                 </label>
                 <select
@@ -757,7 +780,7 @@ export default function Home() {
                     markTouched("tone");
                     setTone(e.target.value);
                   }}
-                  className="w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm"
+                  className="w-full rounded-lg border border-line-strong bg-surface px-2 py-2 text-sm"
                 >
                   {[...new Set([tone, ...TONES])].map((t) => (
                     <option key={t} value={t}>
@@ -767,7 +790,7 @@ export default function Home() {
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+                <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
                   语言
                 </label>
                 <select
@@ -776,7 +799,7 @@ export default function Home() {
                     markTouched("lang");
                     setLang(e.target.value);
                   }}
-                  className="w-full rounded-lg border border-zinc-300 bg-white px-2 py-2 text-sm"
+                  className="w-full rounded-lg border border-line-strong bg-surface px-2 py-2 text-sm"
                 >
                   {[...new Set([lang, ...LANGS])].map((t) => (
                     <option key={t} value={t}>
@@ -788,7 +811,7 @@ export default function Home() {
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
                 篇幅
               </label>
               <select
@@ -797,7 +820,7 @@ export default function Home() {
                   markTouched("length");
                   setLength(e.target.value);
                 }}
-                className="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm"
+                className="w-full rounded-lg border border-line-strong bg-surface px-3 py-2 text-sm"
               >
                 {[...new Set([length, ...LENGTHS])].map((t) => (
                   <option key={t} value={t}>
@@ -808,7 +831,7 @@ export default function Home() {
             </div>
 
             <div>
-              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <label className="mb-1 block text-xs font-medium uppercase tracking-wide text-muted">
                 模式
               </label>
               <div className="flex gap-2">
@@ -816,8 +839,8 @@ export default function Home() {
                   onClick={() => setMode("quick")}
                   className={`flex-1 rounded-lg border px-3 py-2 text-sm transition ${
                     mode === "quick"
-                      ? "border-indigo-600 bg-indigo-600 text-white"
-                      : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50"
+                      ? "border-accent bg-accent text-white"
+                      : "border-line-strong bg-surface text-muted hover:bg-surface-2"
                   }`}
                 >
                   快速生成
@@ -826,15 +849,15 @@ export default function Home() {
                   onClick={() => setMode("agent")}
                   className={`flex-1 rounded-lg border px-3 py-2 text-sm transition ${
                     mode === "agent"
-                      ? "border-indigo-600 bg-indigo-600 text-white"
-                      : "border-zinc-300 bg-white text-zinc-600 hover:bg-zinc-50"
+                      ? "border-accent bg-accent text-white"
+                      : "border-line-strong bg-surface text-muted hover:bg-surface-2"
                   }`}
                 >
                   Agent 流水线
                 </button>
               </div>
               {mode === "agent" && (
-                <label className="mt-2 flex items-center gap-2 text-xs text-zinc-600">
+                <label className="mt-2 flex items-center gap-2 text-xs text-muted">
                   <input
                     type="checkbox"
                     checked={polishOn}
@@ -847,22 +870,22 @@ export default function Home() {
 
             <div className="flex min-h-0 flex-1 flex-col">
               <div className="mb-2 flex items-center justify-between">
-                <h2 className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                <h2 className="text-xs font-medium uppercase tracking-wide text-muted">
                   历史记录
                 </h2>
                 {cloudSynced && (
-                  <span className="text-[10px] text-emerald-600">☁ 云端已同步</span>
+                  <span className="text-[10px] text-ok">☁ 云端已同步</span>
                 )}
               </div>
               <div className="min-h-0 flex-1 space-y-1 overflow-y-auto">
                 {history.length === 0 && (
-                  <p className="text-xs text-zinc-400">暂无历史，生成后自动保存。</p>
+                  <p className="text-xs text-faint">暂无历史，生成后自动保存。</p>
                 )}
                 {history.map((item) => (
                   <button
                     key={item.id}
                     onClick={() => loadHistory(item)}
-                    className="block w-full truncate rounded-md px-2 py-1.5 text-left text-sm text-zinc-700 hover:bg-zinc-100"
+                    className="block w-full truncate rounded-md px-2 py-1.5 text-left text-sm text-ink-2 hover:bg-surface-2"
                     title={item.content}
                   >
                     {item.title}
@@ -875,26 +898,26 @@ export default function Home() {
           <main className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
             <section className="flex flex-col">
               <div className="mb-1 flex items-center justify-between">
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                <label className="text-xs font-medium uppercase tracking-wide text-muted">
                   草稿 / 口述内容
                 </label>
                 {engine === "aai" ? (
                   <span
-                    className="text-xs text-emerald-600"
+                    className="text-xs text-ok"
                     title="AssemblyAI Realtime STT"
                   >
                     🎙 AssemblyAI 实时转写
                   </span>
                 ) : speech.supported ? (
                   <span
-                    className="text-xs text-zinc-400"
+                    className="text-xs text-faint"
                     title={aai.error ?? "未配置 ASSEMBLYAI_API_KEY，已降级为浏览器语音"}
                   >
                     🎙 浏览器语音转写（降级）
                   </span>
                 ) : (
                   <span
-                    className="text-xs text-amber-600"
+                    className="text-xs text-warn"
                     title="请使用 Chrome / Edge 打开以使用语音输入"
                   >
                     🎙 当前浏览器不支持语音
@@ -907,7 +930,7 @@ export default function Home() {
                     <button
                       key={ex.label}
                       onClick={() => setDraft(ex.text)}
-                      className="rounded-full border border-dashed border-indigo-300 bg-white px-3 py-1 text-xs text-indigo-600 transition hover:bg-indigo-50"
+                      className="rounded-full border border-dashed border-line-strong bg-surface px-3 py-1 text-xs text-accent transition hover:bg-accent-soft"
                     >
                       {ex.label}
                     </button>
@@ -915,11 +938,11 @@ export default function Home() {
                 </div>
               )}
               {speech.listening && (
-                <div className="mb-2 flex items-center gap-2 rounded-lg bg-red-50 px-3 py-1.5 text-xs text-red-600">
-                  <span className="h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                <div className="mb-2 flex items-center gap-2 rounded-lg bg-danger-soft px-3 py-1.5 text-xs text-danger">
+                  <span className="h-2 w-2 animate-pulse rounded-full bg-danger" />
                   聆听中…
                   {speech.interim && (
-                    <span className="text-red-500">{speech.interim}</span>
+                    <span className="text-danger">{speech.interim}</span>
                   )}
                 </div>
               )}
@@ -928,20 +951,20 @@ export default function Home() {
                 readOnly={speech.listening}
                 onChange={(e) => setDraft(e.target.value)}
                 placeholder="直接说或写你的思路、要点…AI 会自动判断写什么、要不要查资料"
-                className="min-h-28 resize-none rounded-xl border border-zinc-300 bg-white p-4 text-sm leading-relaxed shadow-sm outline-none transition focus:border-indigo-400"
+                className="min-h-28 resize-none rounded-xl border border-line-strong bg-surface p-4 text-sm leading-relaxed shadow-sm outline-none transition focus:border-accent"
               />
               <div className="mt-3 flex flex-wrap gap-2">
                 {speech.listening ? (
                   <>
                     <button
                       onClick={handleVoiceStopAndRun}
-                      className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+                      className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white transition hover:bg-accent-hover"
                     >
                       停止并生成
                     </button>
                     <button
                       onClick={handleVoiceStop}
-                      className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100"
+                      className="rounded-lg border border-line-strong px-4 py-2 text-sm text-muted hover:bg-surface-2"
                     >
                       仅停止
                     </button>
@@ -951,14 +974,14 @@ export default function Home() {
                     <button
                       onClick={run}
                       disabled={loading || !draft.trim()}
-                      className="rounded-lg bg-indigo-600 px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-500 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-accent-hover disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       {loading ? "生成中…" : "生成"}
                     </button>
                     <button
                       onClick={handleVoiceStart}
                       disabled={!speech.supported || loading}
-                      className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                      className="rounded-lg border border-line-strong px-4 py-2 text-sm text-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       🎤 语音输入
                     </button>
@@ -967,7 +990,7 @@ export default function Home() {
                 {loading && (
                   <button
                     onClick={handleStop}
-                    className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100"
+                    className="rounded-lg border border-line-strong px-4 py-2 text-sm text-muted hover:bg-surface-2"
                   >
                     停止
                   </button>
@@ -975,7 +998,7 @@ export default function Home() {
                 <button
                   onClick={clearAll}
                   disabled={loading}
-                  className="rounded-lg border border-zinc-300 px-4 py-2 text-sm text-zinc-600 hover:bg-zinc-100 disabled:opacity-50"
+                  className="rounded-lg border border-line-strong px-4 py-2 text-sm text-muted hover:bg-surface-2 disabled:opacity-50"
                 >
                   清空
                 </button>
@@ -983,7 +1006,7 @@ export default function Home() {
             </section>
 
             {mode === "agent" && (
-              <div className="flex shrink-0 flex-wrap items-center gap-x-1 gap-y-2 rounded-xl border border-zinc-200 bg-white/80 px-3 py-2.5">
+              <div className="flex shrink-0 flex-wrap items-center gap-x-1 gap-y-2 card/80 px-3 py-2.5">
                 {STAGE_ORDER.map((key, i) => {
                   const status = stages[key];
                   return (
@@ -992,16 +1015,16 @@ export default function Home() {
                       <span
                         className={`text-xs ${
                           status === "pending"
-                            ? "text-zinc-400"
+                            ? "text-faint"
                             : status === "skip"
-                            ? "text-zinc-300 line-through decoration-zinc-300"
-                            : "text-zinc-700"
+                            ? "text-faint line-through decoration-line-strong"
+                            : "text-ink-2"
                         }`}
                       >
                         {STAGE_LABELS[key]}
                       </span>
                       {i < STAGE_ORDER.length - 1 && (
-                        <span className="mx-1 h-px w-4 bg-zinc-200" />
+                        <span className="mx-1 h-px w-4 bg-surface-2" />
                       )}
                     </div>
                   );
@@ -1010,34 +1033,34 @@ export default function Home() {
             )}
 
             {mode === "agent" && (intent || research.length > 0) && (
-              <section className="flex shrink-0 flex-col gap-1.5 rounded-xl border border-violet-200 bg-violet-50/70 p-3">
+              <section className="flex shrink-0 flex-col gap-1.5 rounded-xl border border-accent/35 bg-accent-soft/70 p-3">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-xs font-medium text-violet-700">✨ 意图识别</span>
+                  <span className="text-xs font-medium text-accent">✨ 意图识别</span>
                   {intent ? (
                     <>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-700">
+                      <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-ink-2">
                         {intent.type}
                       </span>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-700">
+                      <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-ink-2">
                         {intent.tone}
                       </span>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-700">
+                      <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-ink-2">
                         {intent.length}
                       </span>
-                      <span className="rounded-full bg-white px-2 py-0.5 text-xs text-zinc-700">
+                      <span className="rounded-full bg-surface px-2 py-0.5 text-xs text-ink-2">
                         {intent.lang}
                       </span>
                       {intent.summary && (
-                        <span className="text-xs text-violet-500">{intent.summary}</span>
+                        <span className="text-xs text-accent">{intent.summary}</span>
                       )}
                     </>
                   ) : (
-                    <span className="text-xs text-zinc-400">识别不可用，已使用手动参数</span>
+                    <span className="text-xs text-faint">识别不可用，已使用手动参数</span>
                   )}
                 </div>
                 {research.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs font-medium text-emerald-700">
+                    <span className="text-xs font-medium text-ok">
                       🔍 检索到 {research.length} 条资料
                     </span>
                     {research.slice(0, 5).map((r, i) => (
@@ -1047,7 +1070,7 @@ export default function Home() {
                         target="_blank"
                         rel="noreferrer"
                         title={r.title}
-                        className="max-w-44 truncate rounded-full bg-white px-2 py-0.5 text-xs text-emerald-700 hover:underline"
+                        className="max-w-44 truncate rounded-full bg-surface px-2 py-0.5 text-xs text-ok hover:underline"
                       >
                         [{i + 1}] {r.title}
                       </a>
@@ -1055,7 +1078,7 @@ export default function Home() {
                   </div>
                 )}
                 {intent?.needSearch && research.length === 0 && searchEnabled && (
-                  <span className="text-xs text-zinc-400">
+                  <span className="text-xs text-faint">
                     已尝试检索「{intent.searchQuery}」，未获取到资料
                   </span>
                 )}
@@ -1063,7 +1086,7 @@ export default function Home() {
             )}
 
             {error && (
-              <p className="shrink-0 rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600">
+              <p className="shrink-0 rounded-lg bg-danger-soft px-3 py-2 text-xs text-danger">
                 {error}
               </p>
             )}
@@ -1071,13 +1094,13 @@ export default function Home() {
             {mode === "agent" && plan && (
               <section className="flex shrink-0 flex-col">
                 <div className="mb-1 flex items-center justify-between">
-                  <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                  <label className="text-xs font-medium uppercase tracking-wide text-muted">
                     大纲（可直接编辑）
                   </label>
                   <button
                     onClick={() => rerunFromDraft(plan, draft.trim(), "")}
                     disabled={loading || rewriting || !draft.trim()}
-                    className="rounded-md border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs text-indigo-600 hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-accent/35 bg-accent-soft px-2.5 py-1 text-xs text-accent hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     ↻ 按新大纲重新成稿
                   </button>
@@ -1085,35 +1108,35 @@ export default function Home() {
                 <textarea
                   value={plan}
                   onChange={(e) => setPlan(e.target.value)}
-                  className="max-h-32 min-h-16 overflow-y-auto whitespace-pre-wrap rounded-xl border border-zinc-200 bg-white p-3 text-sm leading-relaxed text-zinc-700 shadow-sm outline-none focus:border-indigo-400"
+                  className="max-h-32 min-h-16 overflow-y-auto whitespace-pre-wrap card p-3 text-sm leading-relaxed text-ink-2 shadow-sm outline-none focus:border-accent"
                 />
               </section>
             )}
 
             <section className="flex min-h-72 flex-1 flex-col">
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+                <label className="text-xs font-medium uppercase tracking-wide text-muted">
                   成稿
                 </label>
                 <div className="flex flex-wrap gap-2">
                   <button
                     onClick={copyOutput}
                     disabled={!output}
-                    className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50"
+                    className="rounded-md border border-line-strong px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:opacity-50"
                   >
                     复制
                   </button>
                   <button
                     onClick={downloadOutput}
                     disabled={!output}
-                    className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50"
+                    className="rounded-md border border-line-strong px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:opacity-50"
                   >
                     下载 .md
                   </button>
                   <button
                     onClick={runTranslate}
                     disabled={!output || loading}
-                    className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="rounded-md border border-line-strong px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-50"
                     title="把当前成稿译作英文"
                   >
                     🌐 译英文
@@ -1121,7 +1144,7 @@ export default function Home() {
                   <button
                     onClick={() => window.print()}
                     disabled={!output}
-                    className="rounded-md border border-zinc-300 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-100 disabled:opacity-50"
+                    className="rounded-md border border-line-strong px-2.5 py-1 text-xs text-muted hover:bg-surface-2 disabled:opacity-50"
                     title="打印或导出为 PDF"
                   >
                     🖨 打印 / PDF
@@ -1129,29 +1152,29 @@ export default function Home() {
                 </div>
               </div>
               {selection.text && !rewriting && (
-                <div className="mb-1.5 flex flex-wrap items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5">
-                  <span className="text-xs text-indigo-700">
+                <div className="mb-1.5 flex flex-wrap items-center gap-2 rounded-lg border border-accent/35 bg-accent-soft px-3 py-1.5">
+                  <span className="text-xs text-accent">
                     ✂️ 已选 {selection.text.length} 字
                   </span>
                   {REWRITE_ACTIONS.map((a) => (
                     <button
                       key={a.label}
                       onClick={() => runRewrite(a.instruction)}
-                      className="rounded-md bg-white px-2 py-0.5 text-xs text-indigo-600 shadow-sm hover:bg-indigo-100"
+                      className="rounded-md bg-surface px-2 py-0.5 text-xs text-accent shadow-sm hover:bg-accent-soft"
                     >
                       {a.label}
                     </button>
                   ))}
                   <button
                     onClick={() => setSelection({ start: 0, end: 0, text: "" })}
-                    className="text-xs text-zinc-400 hover:text-zinc-600"
+                    className="text-xs text-faint hover:text-muted"
                   >
                     取消
                   </button>
                 </div>
               )}
               {rewriting && (
-                <div className="mb-1.5 rounded-lg bg-indigo-50 px-3 py-1.5 text-xs text-indigo-600">
+                <div className="mb-1.5 rounded-lg bg-accent-soft px-3 py-1.5 text-xs text-accent">
                   ✏️ 正在改写选中片段…
                 </div>
               )}
@@ -1161,22 +1184,22 @@ export default function Home() {
                 readOnly
                 onSelect={(e) => trackSelection(e.currentTarget)}
                 placeholder="生成的成稿会实时显示在这里。选中任意文字可重写、扩写、缩短、换语气…"
-                className="min-h-40 flex-1 resize-none rounded-xl border border-zinc-200 bg-white p-4 text-sm leading-relaxed shadow-sm outline-none"
+                className="min-h-40 flex-1 resize-none card p-4 text-sm leading-relaxed shadow-sm outline-none"
               />
             </section>
 
             {suggestions && (suggestions.titles.length || suggestions.tags.length || suggestions.tips.length) > 0 && (
-              <section className="flex shrink-0 flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50/70 p-3">
-                <span className="text-xs font-medium text-amber-700">💡 智能建议</span>
+              <section className="flex shrink-0 flex-col gap-2 rounded-xl border border-warn-line bg-warn-soft/70 p-3">
+                <span className="text-xs font-medium text-warn">💡 智能建议</span>
                 {suggestions.titles.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs text-zinc-500">标题候选</span>
+                    <span className="text-xs text-muted">标题候选</span>
                     {suggestions.titles.map((t) => (
                       <button
                         key={t}
                         onClick={() => navigator.clipboard.writeText(t).catch(() => {})}
                         title="点击复制"
-                        className="rounded-full bg-white px-2.5 py-0.5 text-xs text-zinc-700 shadow-sm hover:bg-amber-100"
+                        className="rounded-full bg-surface px-2.5 py-0.5 text-xs text-ink-2 shadow-sm hover:bg-warn-soft"
                       >
                         {t}
                       </button>
@@ -1185,13 +1208,13 @@ export default function Home() {
                 )}
                 {suggestions.tags.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-xs text-zinc-500">标签</span>
+                    <span className="text-xs text-muted">标签</span>
                     {suggestions.tags.map((t) => (
                       <button
                         key={t}
                         onClick={() => navigator.clipboard.writeText(t).catch(() => {})}
                         title="点击复制"
-                        className="rounded-full bg-white px-2.5 py-0.5 text-xs text-indigo-600 shadow-sm hover:bg-amber-100"
+                        className="rounded-full bg-surface px-2.5 py-0.5 text-xs text-accent shadow-sm hover:bg-warn-soft"
                       >
                         {t}
                       </button>
@@ -1199,7 +1222,7 @@ export default function Home() {
                   </div>
                 )}
                 {suggestions.tips.length > 0 && (
-                  <ul className="list-inside list-disc text-xs text-zinc-600">
+                  <ul className="list-inside list-disc text-xs text-muted">
                     {suggestions.tips.map((tip) => (
                       <li key={tip}>{tip}</li>
                     ))}

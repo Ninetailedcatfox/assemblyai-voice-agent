@@ -11,3 +11,9 @@ export const AGENT_SAMPLE_RATE = 24000;
 
 /** 上行打包帧长：40ms @ 24kHz。太短会让 WebSocket 消息过密，太长会增加延迟 */
 export const AGENT_FRAME_SAMPLES = 960;
+
+/** 可视化频谱柱数量（麦克风与 agent 语音各一组） */
+export const AGENT_SPECTRUM_BANDS = 32;
+
+/** AnalyserNode 的 FFT 窗口。1024 @ 48kHz ≈ 21ms，够快也够稳 */
+export const AGENT_FFT_SIZE = 1024;

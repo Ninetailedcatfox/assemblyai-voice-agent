@@ -1,30 +1,359 @@
-@import "tailwindcss";
+/*
+ * ⚠️ source(none) 是必需的，不是优化。
+ *
+ * 本仓库的父目录（Desktop/新建文件夹）里还有十几个兄弟项目，Tailwind v4 的
+ * 自动源码探测会越过本仓库边界去扫它们 —— 实测产物 CSS 里出现了
+ * `.bg-zinc-100` / `.text-indigo-600` 等本仓库源码中**根本不存在**的类，
+ * 而它们只存在于兄弟项目 `ai-writing-studio` 里。后果：
+ *   1) 构建产物不可复现 —— 隔壁项目改一行，这边的 CSS 就变；
+ *   2) 产物里混进无关样式，体积虚高。
+ * 显式声明扫描范围后，产物只由本仓库源码决定。
+ */
+@import "tailwindcss" source(none);
+
+@source "../app/**/*.{ts,tsx}";
+@source "../components/**/*.{ts,tsx}";
+@source "../lib/**/*.{ts,tsx}";
+
+/*
+ * 设计令牌（design tokens）
+ * ------------------------------------------------------------------
+ * 之前所有页面直接写 `bg-white` / `text-zinc-900`，而 body 背景在系统深色
+ * 模式下会翻成 #0a0a0a —— 结果是「深色底 + 白卡片 + 深色标题」，
+ * 页面标题直接在深色底上变成不可见的深灰。这里把颜色收敛成语义令牌，
+ * 明暗两套值，任何页面都不可能再写出「不可见文字」。
+ *
+ * 命名：bg / surface（卡片）/ surface-2（内嵌块）/ ink（主文字）/
+ *       ink-2（次级）/ muted（弱化）/ faint（占位）/ line（描边）/ accent
+ */
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
-}
+  color-scheme: light;
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: ui-sans-serif, system-ui, -apple-system,
-    "Segoe UI", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo,
-    Consolas, monospace;
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-2: #f4f5f7;
+  /* raised = 比 surface-2 更"高一层"的表面，用于选中态胶囊。
+     深色下不能复用 surface —— 那会比容器更暗，读起来像凹陷。 */
+  --raised: #ffffff;
+  --ink: #0f1115;
+  --ink-2: #343a45;
+  --muted: #6b7280;
+  --faint: #9ca3af;
+  --line: #e5e7eb;
+  --line-soft: #f0f1f4;
+  --line-strong: #d1d5db;
+
+  --accent: #4f46e5;
+  --accent-hover: #4338ca;
+  --accent-ink: #ffffff;
+  --accent-soft: #eef0fe;
+
+  --ok: #059669;
+  --ok-soft: #ecfdf5;
+  --ok-line: #a7f3d0;
+  --warn: #b45309;
+  --warn-soft: #fffbeb;
+  --warn-line: #fde68a;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --danger-line: #fecaca;
+
+  --shadow-card: 0 1px 2px rgb(16 18 22 / 0.04), 0 1px 3px rgb(16 18 22 / 0.06);
+  --shadow-lift: 0 4px 16px rgb(16 18 22 / 0.08);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    color-scheme: dark;
+
+    --bg: #0b0c0f;
+    --surface: #16181d;
+    --surface-2: #1e2128;
+    --raised: #2b3038;
+    --ink: #f4f5f7;
+    --ink-2: #d3d7de;
+    --muted: #9aa1ad;
+    --faint: #6f7683;
+    --line: #2a2e36;
+    --line-soft: #23262d;
+    --line-strong: #3a3f49;
+
+    --accent: #6366f1;
+    --accent-hover: #7c7ff5;
+    --accent-ink: #ffffff;
+    --accent-soft: #1e2140;
+
+    --ok: #34d399;
+    --ok-soft: #0d2a22;
+    --ok-line: #1d5344;
+    --warn: #fbbf24;
+    --warn-soft: #2c2410;
+    --warn-line: #5c4a15;
+    --danger: #f87171;
+    --danger-soft: #2e1416;
+    --danger-line: #5c2a2c;
+
+    --shadow-card: 0 1px 2px rgb(0 0 0 / 0.4), 0 1px 3px rgb(0 0 0 / 0.3);
+    --shadow-lift: 0 6px 20px rgb(0 0 0 / 0.45);
   }
 }
 
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-raised: var(--raised);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-muted: var(--muted);
+  --color-faint: var(--faint);
+  --color-line: var(--line);
+  --color-line-soft: var(--line-soft);
+  --color-line-strong: var(--line-strong);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-soft: var(--accent-soft);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-ok-line: var(--ok-line);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-warn-line: var(--warn-line);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-danger-line: var(--danger-line);
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 body {
-  background: var(--background);
-  color: var(--foreground);
+  background: var(--bg);
+  color: var(--ink);
   font-family: var(--font-sans);
+}
+
+/* ---------- 组件级工具类（语义化，随主题翻转） ---------- */
+
+@utility card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 0.875rem;
+  box-shadow: var(--shadow-card);
+}
+
+@utility card-flat {
+  background: var(--surface-2);
+  border: 1px solid var(--line-soft);
+  border-radius: 0.625rem;
+}
+
+@utility panel-title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+@utility chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1.4;
+  background: var(--surface-2);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/*
+ * chip-* 故意把基础排版属性重复一遍，而不是依赖 `chip chip-ok` 的层叠顺序 ——
+ * 自定义工具类的输出顺序不是我能保证的，重复写死就没有这个隐患。
+ */
+@utility chip-accent {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+@utility chip-ok {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--ok-soft);
+  color: var(--ok);
+}
+
+@utility chip-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+@utility chip-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 0.375rem;
+  padding: 0.125rem 0.375rem;
+  font-size: 0.625rem;
+  font-weight: 500;
+  line-height: 1.4;
+  white-space: nowrap;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+@utility alert-warn {
+  border: 1px solid var(--warn-line);
+  background: var(--warn-soft);
+  color: var(--warn);
+  border-radius: 0.625rem;
+}
+
+@utility alert-danger {
+  border: 1px solid var(--danger-line);
+  background: var(--danger-soft);
+  color: var(--danger);
+  border-radius: 0.625rem;
+}
+
+@utility btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.375rem 0.75rem;
+  transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+
+@utility btn-ghost {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.625rem;
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 0.75rem;
+  font-weight: 500;
+  padding: 0.375rem 0.75rem;
+  transition: background-color 0.12s ease;
+}
+
+@utility btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.375rem;
+  border-radius: 0.625rem;
+  border: 1px solid transparent;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.375rem 0.875rem;
+  box-shadow: var(--shadow-card);
+  transition: background-color 0.12s ease;
+}
+
+@utility hairline {
+  border-color: var(--line);
+}
+
+/* 报价单等长文本区域 */
+@utility doc-pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  line-height: 1.75;
+  color: var(--ink-2);
+}
+
+/* 语音 orb 的呼吸 / 涟漪 */
+@keyframes orb-ring {
+  0% {
+    transform: scale(0.85);
+    opacity: 0.55;
+  }
+  100% {
+    transform: scale(1.6);
+    opacity: 0;
+  }
+}
+
+@keyframes orb-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.04);
+  }
+}
+
+.orb-ring {
+  animation: orb-ring 2.1s ease-out infinite;
+}
+.orb-breathe {
+  animation: orb-breathe 2.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .orb-ring,
+  .orb-breathe {
+    animation: none;
+  }
+}
+
+/* 细滚动条 */
+.thin-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.thin-scroll::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: 999px;
+}
+.thin-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 /* 打印 / 导出 PDF：仅保留成稿区域 */

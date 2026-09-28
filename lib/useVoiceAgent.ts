@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
-import { AGENT_FRAME_SAMPLES, AGENT_SAMPLE_RATE } from "@/lib/agentAudio";
+import {
+  AGENT_FFT_SIZE,
+  AGENT_FRAME_SAMPLES,
+  AGENT_SAMPLE_RATE,
+  AGENT_SPECTRUM_BANDS,
+} from "@/lib/agentAudio";
 
 /**
  * AssemblyAI Voice Agent API 的浏览器客户端。
@@ -21,6 +26,12 @@ import { AGENT_FRAME_SAMPLES, AGENT_SAMPLE_RATE } from "@/lib/agentAudio";
  * ⚠️ 回声消除必须开（`echoCancellation: true`）：否则麦克风会把 agent 自己的
  * 声音收回去，agent 打断自己，每次回答都被截断成 `interrupted`。
  * 降噪反而要关 —— 服务端已经做过，再叠一层会伤转写准确率。
+ *
+ * 电平表说明：`levelsRef` 里的 mic / agent 是**实测 RMS**，不是按状态编的动画。
+ * 麦克风走 `source → micAnalyser → 零增益 → destination`（零增益是为了让
+ * AnalyserNode 一定被图拉取，同时不出声）；回放走
+ * `bufferSource → master → outAnalyser → destination`。用 ref 而不是 state
+ * 承载，是为了让 60fps 的电平更新完全不触发 React 重渲染。
  */
 
 const WS_URL = "wss://agents.assemblyai.com/v1/ws";
@@ -28,6 +39,13 @@ const WORKLET_URL = "/agent-pcm-worklet.js";
 const CONNECT_TIMEOUT_MS = 15000;
 /** session.update 发出后等 session.ready 的上限 */
 const READY_TIMEOUT_MS = 15000;
+/** RMS → 0..1 的放大系数：正常说话 RMS 约 0.02–0.15 */
+const LEVEL_GAIN = 8;
+/** 电平回落速度（每帧乘数），避免指针抖动 */
+const LEVEL_DECAY = 0.85;
+/** 频谱柱数量 */
+const BANDS = AGENT_SPECTRUM_BANDS;
+const FFT_SIZE = AGENT_FFT_SIZE;
 
 export interface AgentTurn {
   role: "user" | "agent";
@@ -51,6 +69,28 @@ export interface VoiceAgentAnalysis {
   lines: { nameZh: string; landedUnit: number; fobUnit: number; moq: number }[];
 }
 
+/** 实时电平（0..1）与频谱（0..255/柱）。放 ref 里，不进 React 状态，避免 60fps 重渲染 */
+export interface Levels {
+  mic: number;
+  agent: number;
+  /** 麦克风频谱，长度 BANDS */
+  micBands: Uint8Array;
+  /** agent 语音频谱，长度 BANDS */
+  agentBands: Uint8Array;
+}
+
+/**
+ * 频谱分桶边界。用幂次映射把低频拉宽 —— 语音能量集中在低频，
+ * 线性分桶会让前 3 根柱子吃掉全部动态范围，右边全黑。
+ */
+function bandEdges(binCount: number, n: number): number[] {
+  const edges: number[] = [];
+  for (let i = 0; i <= n; i++) {
+    edges.push(Math.floor(Math.pow(i / n, 1.7) * binCount * 0.75));
+  }
+  return edges;
+}
+
 export interface VoiceAgent {
   supported: boolean;
   /** WebSocket 已建、会话进行中 */
@@ -68,6 +108,10 @@ export interface VoiceAgent {
   quote: string;
   quoteSource: string;
   analysis: VoiceAgentAnalysis | null;
+  /** 服务端返回的 agent id（发布在 AssemblyAI 上的那份定义） */
+  agentId: string;
+  /** 实测电平，由内部 rAF 循环持续写入 */
+  levelsRef: React.RefObject<Levels>;
   start: () => void;
   stop: () => void;
 }
@@ -107,6 +151,30 @@ function base64ToFloat32(b64: string): Float32Array {
   return f32;
 }
 
+/** 时域 RMS → 0..1 */
+function rmsToLevel(buf: Float32Array): number {
+  let sum = 0;
+  for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+  const rms = Math.sqrt(sum / buf.length);
+  return Math.min(1, rms * LEVEL_GAIN);
+}
+
+/**
+ * 把 FFT 频域数据按预计算的边界压成 N 根柱子，并做时间平滑
+ * （上升立刻跟、下落乘系数），否则柱状图会逐帧闪烁。
+ */
+function fillBands(freq: Uint8Array, edges: number[], out: Uint8Array) {
+  const n = out.length;
+  for (let i = 0; i < n; i++) {
+    const a = Math.min(edges[i], freq.length - 1);
+    const b = Math.max(a + 1, Math.min(edges[i + 1], freq.length));
+    let sum = 0;
+    for (let j = a; j < b; j++) sum += freq[j];
+    const v = sum / (b - a);
+    out[i] = v > out[i] ? v : out[i] * 0.72;
+  }
+}
+
 export function useVoiceAgent(): VoiceAgent {
   const supported = useSyncExternalStore(
     () => () => {},
@@ -126,6 +194,7 @@ export function useVoiceAgent(): VoiceAgent {
   const [quote, setQuote] = useState("");
   const [quoteSource, setQuoteSource] = useState("");
   const [analysis, setAnalysis] = useState<VoiceAgentAnalysis | null>(null);
+  const [agentId, setAgentId] = useState("");
 
   const wsRef = useRef<WebSocket | null>(null);
   const ctxRef = useRef<AudioContext | null>(null);
@@ -135,6 +204,50 @@ export function useVoiceAgent(): VoiceAgent {
   const readyRef = useRef(false);
   /** 播放调度游标：每个 reply.audio 排在上一段之后 */
   const playCursorRef = useRef(0);
+  /** 已排期/在播的音频源，用于 barge-in 时真正掐掉 */
+  const liveSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  /** 回放总线：所有 agent 语音都从这里过，好挂电平表 */
+  const masterRef = useRef<GainNode | null>(null);
+  const micAnalyserRef = useRef<AnalyserNode | null>(null);
+  const outAnalyserRef = useRef<AnalyserNode | null>(null);
+  const levelRafRef = useRef(0);
+  const levelsRef = useRef<Levels>({
+    mic: 0,
+    agent: 0,
+    micBands: new Uint8Array(BANDS),
+    agentBands: new Uint8Array(BANDS),
+  });
+  // 注意泛型：TS 5.7 起 TypedArray 带缓冲区参数，而 Web Audio 的
+  // getFloatTimeDomainData / getByteFrequencyData 只接受 <ArrayBuffer>，
+  // 不写死就会因为 <ArrayBufferLike> 不兼容而编译失败。
+  const micBufRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const outBufRef = useRef<Float32Array<ArrayBuffer> | null>(null);
+  const micFreqRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const outFreqRef = useRef<Uint8Array<ArrayBuffer> | null>(null);
+  const edgesRef = useRef<number[]>([]);
+
+  /** 掐掉所有已排期但还没播完的 agent 语音 */
+  const killPlayback = useCallback(() => {
+    for (const s of liveSourcesRef.current) {
+      try {
+        s.onended = null;
+        s.stop();
+      } catch {
+        /* 还没 start 或已结束，忽略 */
+      }
+    }
+    liveSourcesRef.current.clear();
+  }, []);
+
+  const stopLevelLoop = useCallback(() => {
+    if (levelRafRef.current) cancelAnimationFrame(levelRafRef.current);
+    levelRafRef.current = 0;
+    const lv = levelsRef.current;
+    lv.mic = 0;
+    lv.agent = 0;
+    lv.micBands.fill(0);
+    lv.agentBands.fill(0);
+  }, []);
 
   const teardown = useCallback(() => {
     const ws = wsRef.current;
@@ -157,12 +270,23 @@ export function useVoiceAgent(): VoiceAgent {
       }, 300);
     }
 
+    stopLevelLoop();
+    killPlayback();
+    playCursorRef.current = 0;
+
     nodeRef.current?.disconnect();
     nodeRef.current = null;
     srcRef.current?.disconnect();
     srcRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
+
+    micAnalyserRef.current?.disconnect();
+    micAnalyserRef.current = null;
+    outAnalyserRef.current?.disconnect();
+    outAnalyserRef.current = null;
+    masterRef.current?.disconnect();
+    masterRef.current = null;
 
     const ctx = ctxRef.current;
     ctxRef.current = null;
@@ -175,7 +299,7 @@ export function useVoiceAgent(): VoiceAgent {
     setUserInterim("");
     setAgentStream("");
     setStatus("已结束");
-  }, []);
+  }, [killPlayback, stopLevelLoop]);
 
   // 关页/切走：同步发 session.end（异步的 await 来不及跑完）
   useEffect(() => {
@@ -314,12 +438,25 @@ export function useVoiceAgent(): VoiceAgent {
         if (!res.ok || !data.token || !data.agentId) {
           throw new Error(data.error ?? "获取 Voice Agent token 失败");
         }
+        setAgentId(data.agentId);
 
         // 3) 音频图：默认采样率 + worklet 内重采样到 24kHz
         const ctx = new AudioContext();
         ctxRef.current = ctx;
         if (ctx.state === "suspended") await ctx.resume();
         await ctx.audioWorklet.addModule(WORKLET_URL);
+
+        // 回放总线 + 输出电平表（AnalyserNode 是直通节点，不改声音）
+        const master = ctx.createGain();
+        const outAnalyser = ctx.createAnalyser();
+        outAnalyser.fftSize = FFT_SIZE;
+        outAnalyser.smoothingTimeConstant = 0.6;
+        master.connect(outAnalyser);
+        outAnalyser.connect(ctx.destination);
+        masterRef.current = master;
+        outAnalyserRef.current = outAnalyser;
+        outBufRef.current = new Float32Array(outAnalyser.fftSize);
+        outFreqRef.current = new Uint8Array(outAnalyser.frequencyBinCount);
 
         const url = new URL(WS_URL);
         url.searchParams.set("token", data.token);
@@ -401,16 +538,22 @@ export function useVoiceAgent(): VoiceAgent {
 
             case "reply.audio": {
               const ctx2 = ctxRef.current;
+              const bus = masterRef.current;
               const b64 = String(msg.data ?? "");
-              if (!ctx2 || !b64) break;
+              if (!ctx2 || !bus || !b64) break;
               const f32 = base64ToFloat32(b64);
               const buf = ctx2.createBuffer(1, f32.length, AGENT_SAMPLE_RATE);
               buf.getChannelData(0).set(f32);
               const node = ctx2.createBufferSource();
               node.buffer = buf;
-              node.connect(ctx2.destination);
+              node.connect(bus);
               const now = ctx2.currentTime;
               const startAt = Math.max(playCursorRef.current, now);
+              liveSourcesRef.current.add(node);
+              node.onended = () => {
+                liveSourcesRef.current.delete(node);
+                node.disconnect();
+              };
               node.start(startAt);
               playCursorRef.current = startAt + buf.duration;
               break;
@@ -432,8 +575,10 @@ export function useVoiceAgent(): VoiceAgent {
             case "reply.done": {
               setSpeaking(false);
               const replyId = String(msg.reply_id ?? "");
-              // 打断：丢掉还没播的音频，别让过期语音继续放
+              // 打断：把已经排进队列、还没播出来的语音真正掐掉。
+              // （只把游标推到当前时刻是不够的 —— 已 start() 的 BufferSource 会照播）
               if (msg.status === "interrupted") {
+                killPlayback();
                 const ctx2 = ctxRef.current;
                 playCursorRef.current = ctx2 ? ctx2.currentTime : 0;
               }
@@ -529,6 +674,22 @@ export function useVoiceAgent(): VoiceAgent {
         // 4) ready 之后才接音频图并开始上行
         const source = ctx.createMediaStreamSource(media);
         srcRef.current = source;
+
+        // 麦克风电平表。零增益支路是必需的：AnalyserNode 若没有任何通往
+        // destination 的路径，部分实现不会拉取它，读出来永远是 0。
+        const micAnalyser = ctx.createAnalyser();
+        micAnalyser.fftSize = FFT_SIZE;
+        micAnalyser.smoothingTimeConstant = 0.6;
+        const silent = ctx.createGain();
+        silent.gain.value = 0;
+        source.connect(micAnalyser);
+        micAnalyser.connect(silent);
+        silent.connect(ctx.destination);
+        micAnalyserRef.current = micAnalyser;
+        micBufRef.current = new Float32Array(micAnalyser.fftSize);
+        micFreqRef.current = new Uint8Array(micAnalyser.frequencyBinCount);
+        edgesRef.current = bandEdges(micAnalyser.frequencyBinCount, BANDS);
+
         const node = new AudioWorkletNode(ctx, "agent-pcm16", {
           processorOptions: {
             inputSampleRate: ctx.sampleRate,
@@ -542,14 +703,50 @@ export function useVoiceAgent(): VoiceAgent {
             ws.send(JSON.stringify({ type: "input.audio", audio: pcm16ToBase64(e.data) }));
           }
         };
+        // source → worklet（不上 destination，否则麦克风原声会被回放）
         source.connect(node);
-        // 不接 destination：否则会把麦克风原声回放出来
+
+        // 5) 电平 + 频谱采样循环：写 ref，不 setState
+        const tick = () => {
+          const lv = levelsRef.current;
+          const edges = edgesRef.current;
+
+          const ma = micAnalyserRef.current;
+          const mb = micBufRef.current;
+          const mf = micFreqRef.current;
+          if (ma && mb && mf) {
+            ma.getFloatTimeDomainData(mb);
+            lv.mic = Math.max(rmsToLevel(mb), lv.mic * LEVEL_DECAY);
+            ma.getByteFrequencyData(mf);
+            fillBands(mf, edges, lv.micBands);
+          } else {
+            lv.mic = 0;
+            lv.micBands.fill(0);
+          }
+
+          const oa = outAnalyserRef.current;
+          const ob = outBufRef.current;
+          const of_ = outFreqRef.current;
+          if (oa && ob && of_) {
+            oa.getFloatTimeDomainData(ob);
+            lv.agent = Math.max(rmsToLevel(ob), lv.agent * LEVEL_DECAY);
+            oa.getByteFrequencyData(of_);
+            fillBands(of_, edges, lv.agentBands);
+          } else {
+            lv.agent = 0;
+            lv.agentBands.fill(0);
+          }
+
+          levelRafRef.current = requestAnimationFrame(tick);
+        };
+        stopLevelLoop();
+        levelRafRef.current = requestAnimationFrame(tick);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Voice Agent 启动失败");
         teardown();
       }
     })();
-  }, [active, runTool, teardown]);
+  }, [active, runTool, teardown, killPlayback, stopLevelLoop]);
 
   const stop = useCallback(() => {
     teardown();
@@ -569,6 +766,8 @@ export function useVoiceAgent(): VoiceAgent {
     quote,
     quoteSource,
     analysis,
+    agentId,
+    levelsRef,
     start,
     stop,
   };

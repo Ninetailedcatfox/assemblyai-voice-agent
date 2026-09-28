@@ -10,6 +10,7 @@
  */
 
 import type { ChatMessage } from "./llm";
+import { marketNameEn } from "./marketNames";
 import {
   CATALOG,
   DEFAULT_ASSUMPTIONS,
@@ -314,7 +315,7 @@ ${flags.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
 ${intent.summary || "（见下方结构化信息）"}
 
 【结构化信息】
-- 市场：${intent.buyerMarket}
+- 市场：${marketNameEn(intent.buyerMarket) ?? "未指明"}（写成英文，不要写中文国名）
 - 买家类型：${intent.buyerType}
 - 品类：${intent.category}
 - 机型：${intent.models.join(", ")}

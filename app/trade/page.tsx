@@ -38,7 +38,7 @@ interface Intent {
 }
 
 interface Analysis {
-  source: "ai" | "fallback";
+  source: "rules" | "ai";
   warning?: string;
   intent: Intent;
   flags: string[];
@@ -46,6 +46,9 @@ interface Analysis {
   assumptions: { freightMode: "sea" | "air"; freightRate: number; dutyRate: number };
   lines: QuoteLineSummary[];
 }
+
+/** 报价单是谁产出的：ai = LLM 起草；generated = 本地确定性生成；unchanged = 改价失败原样退回 */
+type QuoteSource = "" | "ai" | "generated" | "unchanged";
 
 type StageKey = "analyze" | "match" | "cost" | "draft";
 type StageStatus = "pending" | "running" | "done" | "error";
@@ -102,6 +105,8 @@ export default function TradePage() {
   const [busy, setBusy] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [revising, setRevising] = useState(false);
+  const [quoteSource, setQuoteSource] = useState<QuoteSource>("");
+  const [quoteNote, setQuoteNote] = useState("");
 
   const { engine, aai, speech } = useTranscription("zh-CN");
   const prevTranscript = useRef("");
@@ -123,7 +128,17 @@ export default function TradePage() {
     setAnalysis(null);
     setQuote("");
     setError("");
+    setQuoteSource("");
+    setQuoteNote("");
     setStages(pendingStages());
+  };
+
+  /** 从响应头读报价单来源与告警（服务端在降级时会说明原因） */
+  const readQuoteMeta = (res: Response) => {
+    const src = res.headers.get("X-Quote-Source");
+    setQuoteSource(src === "ai" || src === "generated" || src === "unchanged" ? src : "");
+    const warn = res.headers.get("X-Quote-Warning");
+    setQuoteNote(warn ? decodeURIComponent(warn) : "");
   };
 
   const run = async () => {
@@ -156,6 +171,7 @@ export default function TradePage() {
         const d = (await quoteRes.json()) as { error?: string };
         throw new Error(d.error ?? "报价单生成失败");
       }
+      readQuoteMeta(quoteRes);
       setStage("draft", "done");
       await pipeStream(quoteRes, (chunk) => setQuote((q) => q + chunk));
     } catch (err) {
@@ -192,6 +208,7 @@ export default function TradePage() {
         const d = (await res.json()) as { error?: string };
         throw new Error(d.error ?? "改价失败");
       }
+      readQuoteMeta(res);
       setInstruction("");
       await pipeStream(res, (chunk) => setQuote((q) => q + chunk));
     } catch (err) {
@@ -357,10 +374,11 @@ export default function TradePage() {
                     className={`rounded px-1.5 py-0.5 text-[10px] ${
                       analysis.source === "ai"
                         ? "bg-emerald-50 text-emerald-700"
-                        : "bg-amber-50 text-amber-700"
+                        : "bg-zinc-100 text-zinc-600"
                     }`}
+                    title="默认走确定性规则解析（毫秒级、不会幻觉）；传 refine 才启用 LLM 语义解析"
                   >
-                    {analysis.source === "ai" ? "LLM 解析" : "本地规则兜底"}
+                    {analysis.source === "ai" ? "LLM 语义解析" : "规则解析 · 确定性"}
                   </span>
                 </div>
                 <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
@@ -464,13 +482,37 @@ export default function TradePage() {
                 <span className="text-xs font-semibold uppercase tracking-wide text-zinc-500">
                   English Quotation
                 </span>
-                <button
-                  onClick={copyQuote}
-                  className="rounded border border-zinc-300 px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
-                >
-                  复制
-                </button>
+                <div className="flex items-center gap-2">
+                  {quoteSource && (
+                    <span
+                      className={`rounded px-1.5 py-0.5 text-[10px] ${
+                        quoteSource === "ai"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : quoteSource === "unchanged"
+                          ? "bg-amber-50 text-amber-700"
+                          : "bg-zinc-100 text-zinc-600"
+                      }`}
+                    >
+                      {quoteSource === "ai"
+                        ? "LLM 起草"
+                        : quoteSource === "unchanged"
+                        ? "未改动"
+                        : "本地生成"}
+                    </span>
+                  )}
+                  <button
+                    onClick={copyQuote}
+                    className="rounded border border-zinc-300 px-2 py-1 text-[11px] text-zinc-600 hover:bg-zinc-100"
+                  >
+                    复制
+                  </button>
+                </div>
               </div>
+              {quoteNote && (
+                <p className="border-b border-zinc-100 bg-amber-50/60 px-3 py-1.5 text-[11px] text-amber-800">
+                  {quoteNote}
+                </p>
+              )}
               <pre className="min-h-40 flex-1 overflow-auto whitespace-pre-wrap px-3 py-3 text-xs leading-relaxed text-zinc-800">
                 {quote || "生成中…"}
               </pre>

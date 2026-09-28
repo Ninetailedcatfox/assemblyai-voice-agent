@@ -193,10 +193,18 @@ describe("quoteMessages", () => {
   it("user prompt 带上结构化询盘信息", () => {
     const ctx = buildQuoteContext(baseIntent({ targetPriceUsd: 1.1 }));
     const [, user] = quoteMessages(ctx);
-    expect(user.content).toContain("美国");
+    // 市场名必须给英文：给中文国名的话，模型会把"美国"原样抄进英文报价单
+    expect(user.content).toContain("United States");
+    expect(user.content).not.toContain("市场：美国");
     expect(user.content).toContain("iPhone 16 Pro Max");
     expect(user.content).toContain("5000");
     expect(user.content).toContain("$1.1");
+  });
+
+  it("市场名映射不到时写「未指明」，不把中文漏给模型", () => {
+    const ctx = buildQuoteContext(baseIntent({ buyerMarket: "火星" }));
+    const [, user] = quoteMessages(ctx);
+    expect(user.content).toContain("市场：未指明");
   });
 
   it("禁止中文输出（买家是海外客户）", () => {

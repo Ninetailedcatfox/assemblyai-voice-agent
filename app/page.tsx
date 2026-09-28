@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
 import {
   quickMessages,
   planMessages,
@@ -17,8 +18,7 @@ import {
   WRITING_TYPES,
   type WritingIntent,
 } from "@/lib/intent";
-import { useSpeechRecognition } from "@/lib/useSpeechRecognition";
-import { useAssemblyAIStream } from "@/lib/useAssemblyAIStream";
+import { useTranscription } from "@/lib/useTranscription";
 import { mergeHistories, type HistoryItem } from "@/lib/historyStore";
 
 interface ProviderInfo {
@@ -124,26 +124,8 @@ export default function Home() {
     [type, tone, length, lang]
   );
 
-  // 转写引擎：优先 AssemblyAI Realtime STT，任一环节不可用则降级浏览器 Web Speech。
-  // 两个 hook 接口完全一致，所以下游逻辑一行都不用分叉。
-  const aai = useAssemblyAIStream();
-  const webSpeech = useSpeechRecognition("zh-CN");
-  const [engine, setEngine] = useState<"aai" | "web">("web");
-  useEffect(() => {
-    let alive = true;
-    fetch("/api/aai-token?check=1", { cache: "no-store" })
-      .then((r) => r.json() as Promise<{ available?: boolean }>)
-      .then((d) => {
-        if (alive && d.available && aai.supported) setEngine("aai");
-      })
-      .catch(() => {
-        /* 探测失败 → 保持降级，Demo 不能开天窗 */
-      });
-    return () => {
-      alive = false;
-    };
-  }, [aai.supported]);
-  const speech = engine === "aai" ? aai : webSpeech;
+  // 转写引擎：优先 AssemblyAI Realtime STT，不可用则降级浏览器 Web Speech
+  const { engine, aai, speech } = useTranscription("zh-CN");
   const prevTranscript = useRef("");
   // 语音识别：已确认文本实时追加进草稿；停止时把临时文本一并补上
   useEffect(() => {
@@ -700,6 +682,12 @@ export default function Home() {
             <span className="text-xs text-zinc-400">说一段话 → 查资料 → 透明成稿</span>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href="/trade"
+              className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
+            >
+              🌐 外贸模式
+            </Link>
             {searchEnabled && (
               <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs text-emerald-700">
                 🔍 检索增强已启用

@@ -19,15 +19,24 @@ import {
  * - 端点 wss://streaming.assemblyai.com/v3/ws，参数走 query string
  * - 鉴权用临时 token 作 query 参数（token 由 /api/aai-token 签发，一次性）
  * - 客户端→服务端只有一种消息：{"type":"Terminate"}
- * - 服务端→客户端三种：Begin / Turn / Termination
+ * - 服务端→客户端：Begin / Turn / Termination，以及可能的错误事件
  * - ⚠️ 计费按「连接时长」而非音频量 —— 未正常关闭的会话按满 3 小时计费，
  *   所以任何退出路径（手动停止 / 组件卸载 / pagehide）都必须 Terminate
+ *
+ * ⚠️ 实测（2026-09-28，用假 key 探过）：**token 无效时 WebSocket 握手照样返回
+ * 101 Switching Protocols**，错误是在连接建立之后才以事件形式抛出来的。
+ * 因此「握手成功」不等于「鉴权通过」：
+ * - 必须等 `Begin` 事件才算真正连上，超时未收到就判定失败；
+ * - 必须处理连接内的错误事件，否则 UI 会永远卡在「聆听中」；
+ * - `onclose` 必须在 await 之前就挂上，否则握手后立即断开会被漏掉。
  */
 
 const WORKLET_URL = "/aai-pcm-worklet.js";
 const WS_BASE = "wss://streaming.assemblyai.com/v3/ws";
 const SPEECH_MODEL = "universal-3-5-pro";
 const CONNECT_TIMEOUT_MS = 10000;
+/** 握手成功后等 `Begin` 的上限；收不到基本就是 token 无效 */
+const BEGIN_TIMEOUT_MS = 8000;
 /** Terminate 之后留一点时间收尾包（官方提示：要留够时间收最后一个 final） */
 const DRAIN_MS = 400;
 
@@ -75,6 +84,8 @@ export function useAssemblyAIStream(): AssemblyAIStream {
   const srcRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const lastTurnRef = useRef(-1);
+  /** 会话是否已收到 Begin —— 用来判定「握手成功但鉴权失败」 */
+  const beganRef = useRef(false);
 
   /** 拆掉整条链路。所有退出路径都收敛到这里，避免漏关导致按满时长计费。 */
   const teardown = useCallback(() => {
@@ -130,6 +141,7 @@ export function useAssemblyAIStream(): AssemblyAIStream {
     setTranscript("");
     setInterim("");
     lastTurnRef.current = -1;
+    beganRef.current = false;
     setListening(true);
 
     void (async () => {
@@ -163,48 +175,106 @@ export function useAssemblyAIStream(): AssemblyAIStream {
         ws.binaryType = "arraybuffer";
         wsRef.current = ws;
 
+        /** 连接期失败只 reject 一次，避免 onerror + onclose 双触发 */
+        let settled = false;
+        let rejectConnect: ((e: Error) => void) | null = null;
+        const failConnect = (msg: string) => {
+          if (settled) return;
+          settled = true;
+          rejectConnect?.(new Error(msg));
+        };
+
+        /** Begin 到达即 resolve；连接提前关闭也 resolve（由调用方看 beganRef 判定） */
+        let resolveBegin: (() => void) | null = null;
+        const beginPromise = new Promise<void>((resolve) => {
+          resolveBegin = resolve;
+        });
+
         ws.onmessage = (ev: MessageEvent) => {
-          let msg: { type?: string };
+          let msg: { type?: string; error?: string; message?: string };
           try {
-            msg = JSON.parse(String(ev.data)) as { type?: string };
+            msg = JSON.parse(String(ev.data)) as typeof msg;
           } catch {
             return; // 非 JSON 帧，忽略
           }
-          if (msg.type !== "Turn") return;
-          const turn = msg as TurnEvent;
-          if (turn.end_of_turn) {
-            // 同一轮可能重复推送，按 turn_order 去重
-            if (turn.turn_order <= lastTurnRef.current) return;
-            lastTurnRef.current = turn.turn_order;
-            setTranscript((prev) => prev + turn.transcript);
-            setInterim("");
-          } else {
-            setInterim(turn.transcript);
+          const type = msg.type ?? "";
+
+          if (type === "Begin") {
+            beganRef.current = true;
+            resolveBegin?.();
+            return;
           }
+          if (type === "Termination") {
+            // 服务端主动结束会话：不要留在「聆听中」状态
+            wsRef.current = null;
+            setListening(false);
+            setInterim("");
+            return;
+          }
+          if (type === "Turn") {
+            const turn = msg as unknown as TurnEvent;
+            if (turn.end_of_turn) {
+              // 同一轮可能重复推送，按 turn_order 去重
+              if (turn.turn_order <= lastTurnRef.current) return;
+              lastTurnRef.current = turn.turn_order;
+              setTranscript((prev) => prev + turn.transcript);
+              setInterim("");
+            } else {
+              setInterim(turn.transcript);
+            }
+            return;
+          }
+          // 其余一律按错误事件处理：握手成功不代表鉴权通过，错误是在连接内抛的
+          const detail = msg.error ?? msg.message ?? type;
+          if (detail) failConnect(`AssemblyAI 错误：${String(detail).slice(0, 120)}`);
+        };
+
+        ws.onerror = () => failConnect("连接 AssemblyAI 失败");
+
+        // ⚠️ onclose 必须在 await 之前挂：握手后立即断开的话，晚挂就漏了
+        ws.onclose = (ev: CloseEvent) => {
+          wsRef.current = null;
+          resolveBegin?.();
+          if (!beganRef.current) {
+            failConnect(
+              `AssemblyAI 在会话开始前断开（code ${ev.code}${
+                ev.reason ? ` ${ev.reason.slice(0, 80)}` : ""
+              }）`
+            );
+            setListening(false);
+            setInterim("");
+            return;
+          }
+          setListening(false);
+          setInterim("");
         };
 
         await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(
-            () => reject(new Error("连接 AssemblyAI 超时")),
-            CONNECT_TIMEOUT_MS
-          );
+          rejectConnect = reject;
+          const timer = setTimeout(() => reject(new Error("连接 AssemblyAI 超时")), CONNECT_TIMEOUT_MS);
           ws.onopen = () => {
             clearTimeout(timer);
             resolve();
           };
-          ws.onerror = () => {
-            clearTimeout(timer);
-            reject(new Error("连接 AssemblyAI 失败"));
-          };
         });
+        settled = true;
 
-        // 连上之后再把 onerror/onclose 换成运行期语义
-        ws.onerror = () => setError("AssemblyAI 连接中断");
-        ws.onclose = () => {
-          wsRef.current = null;
-          setListening(false);
-          setInterim("");
-        };
+        // 握手成功 ≠ 鉴权通过：必须等到 Begin 才算真正连上
+        await Promise.race([
+          beginPromise,
+          new Promise<void>((_, reject) =>
+            setTimeout(
+              () =>
+                reject(new Error("AssemblyAI 未返回 Begin（临时 token 可能无效或已过期）")),
+              BEGIN_TIMEOUT_MS
+            )
+          ),
+        ]).catch((err: unknown) => {
+          throw err instanceof Error ? err : new Error("AssemblyAI 未开始会话");
+        });
+        if (!beganRef.current) {
+          throw new Error("AssemblyAI 未返回 Begin（临时 token 可能无效或已过期）");
+        }
 
         const source = ctx.createMediaStreamSource(media);
         srcRef.current = source;

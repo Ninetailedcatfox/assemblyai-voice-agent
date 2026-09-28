@@ -142,9 +142,12 @@ export async function POST(request: Request) {
     return badRequest("无法确定询盘意图：draft 与 currentQuote 至少要有一个。");
   }
 
-  // 走到第 3 条时，机型/品类是从英文报价单猜的，基本不可靠；
-  // 此时把整个产品库都给模型当价格来源，避免只检索到几个不相干的 SKU。
-  const reliableIntent = Boolean(explicit) || Boolean(draft.trim());
+  // 走到第 3 条（只有 currentQuote）时，机型/品类是从英文报价单猜的，可能不可靠。
+  // 但只要机型命中了，检索就是准的 —— 报价单里通常带着机型名，所以别急着放宽到全库。
+  const reliableIntent =
+    Boolean(explicit) ||
+    Boolean(draft.trim()) ||
+    baseIntent.models.some((m) => m !== "universal");
   const limit = reliableIntent ? 3 : CATALOG.length;
 
   const isRevision = Boolean(currentQuote && instruction);

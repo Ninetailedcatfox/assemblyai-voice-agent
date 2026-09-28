@@ -16,6 +16,17 @@ Submission for the **AssemblyAI Voice Agent Hackathon 2026**.
 | AssemblyAI token endpoint (`app/api/aai-token/route.ts`) | Not written yet |
 | TTS read-back | Not written yet |
 
+## Live demo
+
+<https://assemblyai-voice-agent-phi.vercel.app>
+
+Deployed on Vercel as a **dedicated project for this hackathon** — it shares
+nothing with any other submission.
+
+> Without `ASSEMBLYAI_API_KEY` configured, voice input falls back to the
+> browser's built-in Web Speech API. The demo stays usable, but the AssemblyAI
+> path is inactive (the UI shows "浏览器语音转写（降级）").
+
 ## Getting started
 
 ```bash

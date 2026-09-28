@@ -29,6 +29,12 @@ export interface QuoteDocumentOptions {
   /** 注入当前时间以便测试；默认取系统时间 */
   now?: Date;
   assumptions?: QuoteAssumptions;
+  /** 改价场景：把"改了什么"明确写进报价单，避免买卖双方各记一版 */
+  revision?: {
+    instruction: string;
+    changes: string[];
+    sampleQty?: number;
+  };
 }
 
 export function buildQuoteDocument(
@@ -43,7 +49,9 @@ export function buildQuoteDocument(
   const validUntil = new Date(now.getTime() + VALIDITY_DAYS * 86400_000)
     .toISOString()
     .slice(0, 10);
-  const ref = `QTN-${date.replace(/-/g, "")}-${String(intent.quantity).slice(0, 5)}`;
+  const ref = `QTN-${date.replace(/-/g, "")}-${String(intent.quantity).slice(0, 5)}${
+    options.revision ? "-R1" : ""
+  }`;
 
   const out: string[] = [];
   let sec = 0;
@@ -63,6 +71,19 @@ export function buildQuoteDocument(
   if (marketEn) out.push(`**Buyer market:** ${marketEn}  `);
   out.push(`**Trade term:** ${intent.incoterm} Ningbo, China`);
   out.push("");
+
+  // ── 改价说明（只在这份是改价版本时出现）──────────────────────────────
+  if (options.revision && options.revision.changes.length > 0) {
+    out.push(
+      `> **REVISION NOTICE — ${date}.** This supersedes the previous quotation of the same reference.`
+    );
+    for (const c of options.revision.changes) out.push(`> - ${c}`);
+    out.push(">");
+    out.push(
+      "> All other terms remain unchanged. Prices shown below already reflect the revision."
+    );
+    out.push("");
+  }
 
   // ── 1. 产品与价格 ─────────────────────────────────────────────────────
   nextSection("Product & Pricing");
@@ -101,6 +122,13 @@ export function buildQuoteDocument(
   out.push(
     "- **Artwork:** print-ready files must be supplied by the buyer; a pre-production sample is required before mass production."
   );
+  if (options.revision?.sampleQty) {
+    out.push(
+      `- **Trial order:** ${options.revision.sampleQty.toLocaleString(
+        "en-US"
+      )} pcs can ship as a separate trial shipment. Sample unit price and freight differ from the volume pricing below and will be confirmed separately.`
+    );
+  }
   out.push("");
 
   // ── 3. 运费与体积重 ───────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 {
-  "name": "ai-writing-studio",
+  "name": "assemblyai-voice-agent",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -10,11 +10,9 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@types/three": "^0.185.4",
     "next": "16.3.1",
     "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "three": "^0.185.1"
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

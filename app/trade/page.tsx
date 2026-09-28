@@ -255,6 +255,12 @@ export default function TradePage() {
             {engine === "aai" ? "🎙 AssemblyAI 实时转写" : "🎙 浏览器语音转写（降级）"}
           </span>
           <Link
+            href="/agent"
+            className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-100"
+          >
+            语音 Agent
+          </Link>
+          <Link
             href="/"
             className="rounded-lg border border-zinc-300 px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-100"
           >

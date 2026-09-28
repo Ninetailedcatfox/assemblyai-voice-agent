@@ -683,6 +683,12 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <Link
+              href="/agent"
+              className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 transition hover:bg-emerald-100"
+            >
+              🎧 语音报价 Agent
+            </Link>
+            <Link
               href="/trade"
               className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
             >

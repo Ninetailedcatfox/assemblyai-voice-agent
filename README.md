@@ -55,7 +55,7 @@ Everything above, by voice, in one conversation.
 
 | File | |
 |---|---|
-| `submission/VoiceQuote-demo.mp4` | 3:59 demo — Chinese narration, burned-in subtitles, scene 4 is unedited session audio |
+| `submission/VoiceQuote-demo.mp4` | 3:59 demo — Chinese narration with **bilingual (CN/EN) burned-in subtitles**; scene 4 is unedited session audio |
 | `submission/VoiceQuote-deck.pdf` | 10-slide deck |
 | `submission/VoiceQuote-cover.png` | 1920×1080 cover |
 | `submission/sess_*.timeline.json` | The raw Voice Agent session timeline behind the video's numbers |

@@ -19,7 +19,9 @@ import {
  * - 上行：`input.audio`（base64 PCM16 24kHz），**必须等 `session.ready` 之后**才发
  * - 下行：`reply.audio`（base64 PCM16 24kHz）= agent 的语音
  * - 工具：`tool.call` → 执行 → **等 `reply.done` 到了再发 `tool.result`**
- *   （官方时序图明确要求；工具调用那一轮的 `reply_id` 是 `fc-<call_id>`）
+ *   （官方要求"reply.done 是最新事件时"才发）。注意**不能只认 `fc-` 前缀的
+ *   reply_id** —— 真语音实测出现过 tool.call 后跟的是另一个在飞回复的
+ *   reply.done，只认前缀会导致结果永远发不出去。详见下方 readyResults 注释。
  * - 收尾：先发 `session.end` 再关 socket。裸 `ws.close()` 会让会话停在
  *   30 秒 `session.resume` 宽限期里，**那段是计费的**
  *
@@ -463,17 +465,32 @@ export function useVoiceAgent(): VoiceAgent {
         const ws = new WebSocket(url.toString());
         wsRef.current = ws;
 
-        // 工具调用的时序：结果先算好放队列，等该轮的 reply.done 到了再发
+        /*
+         * 工具结果回传的时序。
+         *
+         * 官方要求：当 `reply.done` 是"最新收到的事件"时才发 `tool.result`。
+         *
+         * ⚠️ 这里曾经写成「只在 reply_id 以 `fc-` 开头时才发」，那是错的 ——
+         * 实测（真语音喂入）出现过这样的序列：
+         *     tool.call(analyze_inquiry) → reply.done(reply_id = resp_xxx)
+         * 因为 tool.call 是在**另一个回复还在飞**的时候到的，紧随其后的
+         * reply.done 属于那个在飞的回复，而不是工具轮。只认 `fc-` 会让结果
+         * 一直躺在队列里发不出去，agent 收不到数据，于是对用户说
+         * "不好意思，刚才系统出点问题" —— 现象看着像服务端故障，其实是本地时序 bug。
+         *
+         * 现在改成用 reply.done 的**序号**判断：发工具结果前记下当时的序号，
+         * 结果算完时如果序号已经前进（说明这轮回复已经结束），就立刻回传；
+         * 否则排队，等下一个 reply.done 到达时统一冲掉。
+         */
         const readyResults: { call_id: string; result: string; is_error: boolean }[] = [];
-        let flushDue = 0;
-        const tryFlush = () => {
-          while (flushDue > 0 && readyResults.length > 0) {
-            flushDue -= 1;
-            const r = readyResults.shift()!;
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: "tool.result", ...r }));
-            }
+        let replyDoneSeq = 0;
+        const sendResult = (r: { call_id: string; result: string; is_error: boolean }) => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ type: "tool.result", ...r }));
           }
+        };
+        const tryFlush = () => {
+          while (readyResults.length > 0) sendResult(readyResults.shift()!);
         };
 
         let settled = false;
@@ -582,11 +599,11 @@ export function useVoiceAgent(): VoiceAgent {
                 const ctx2 = ctxRef.current;
                 playCursorRef.current = ctx2 ? ctx2.currentTime : 0;
               }
-              // 工具调用那一轮的 reply_id 是 fc-<call_id>，此时才轮到发 tool.result
-              if (replyId.startsWith("fc-")) {
-                flushDue += 1;
-                tryFlush();
-              }
+              // 工具调用那一轮的 reply_id 是 fc-<call_id>，但**不能只认这个前缀** ——
+              // 见 readyResults 处的注释。任何 reply.done 都推进序号并冲队列。
+              replyDoneSeq += 1;
+              void replyId;
+              tryFlush();
               setStatus("已连接，请说话");
               break;
             }
@@ -595,13 +612,16 @@ export function useVoiceAgent(): VoiceAgent {
               const callId = String(msg.call_id ?? "");
               const name = String(msg.name ?? "");
               const args = (msg.arguments ?? {}) as Record<string, unknown>;
+              const seqAtCall = replyDoneSeq;
               void runTool(callId, name, args).then((result) => {
-                readyResults.push({
+                const r = {
                   call_id: callId,
                   result,
                   is_error: result.includes('"error"'),
-                });
-                tryFlush();
+                };
+                // 结果算完时如果这轮回复已经结束，立刻回传；否则排队等下一个 reply.done
+                if (replyDoneSeq > seqAtCall) sendResult(r);
+                else readyResults.push(r);
               });
               break;
             }

@@ -75,6 +75,21 @@ export const VOICE_AGENT_KEYTERMS = [
   "空运",
 ];
 
+/**
+ * 转写偏置提示词（≤1750 字符）。
+ *
+ * 和 keyterms 是两回事：keyterms 是"词表加权"，这一段是"场景说明"。
+ * 实测（SAPI 合成语音灌入）未加时把 "IMD" 转成 "MD"、"美仓" 转成 "美汤"、
+ * "目标价" 转成 "把" —— 专业词和数字都听不准，报价就全错了。
+ */
+export const VOICE_AGENT_TRANSCRIPTION_PROMPT =
+  "这是中国外贸业务员口述的海外买家询盘，中英混说。请准确转写：" +
+  "手机配件品类（磁吸壳、钢化膜、图案壳、IMD 工艺、功能机壳）、" +
+  "苹果机型（iPhone 16、iPhone 16 Pro、iPhone 16 Pro Max）、" +
+  "贸易术语（FOB、CIF、DDP、EXW、MOQ、起订量、体积重、到岸成本、关税、授权链、私标、试单、打样、海运、空运）、" +
+  "地名（美国、迪拜、沙特、尼日利亚、德国）、平台（亚马逊、TikTok Shop）。" +
+  "数字要听准：数量（五千个、一万个、两万个）、单价（一点一美元、零点九五美元）、交期（两周）。";
+
 /** 客户端工具定义（不配 http = 由浏览器执行） */
 export const AGENT_TOOLS = [
   {
@@ -138,6 +153,22 @@ export function voiceAgentDefinition() {
       type: "audio",
       format: { encoding: "audio/pcm", sample_rate: AGENT_SAMPLE_RATE },
       keyterms: VOICE_AGENT_KEYTERMS,
+      transcription_prompt: VOICE_AGENT_TRANSCRIPTION_PROMPT,
+      /*
+       * 轮次检测。默认 min_silence=1000ms 对本场景太小 —— 口述询盘是一整段
+       * 带逗号停顿的话，1 秒静音就把 "美国一个亚马逊私标卖家，要 5000 个…"
+       * 切成了独立发言。实测默认值下**一句话被切成 6~11 段**，agent 拿到第一段
+       * 残缺文本就去调工具，然后反复追问，来回浪费好几轮。
+       *
+       * 1800ms 能吞掉逗号停顿，代价是用户说完后多等 0.8 秒才听到回应 ——
+       * 对这个"说一长段"的用法值得。
+       */
+      turn_detection: {
+        min_silence: 1800,
+        max_silence: 4000,
+        interrupt_response: true,
+        interruption_delay: 200,
+      },
     },
     output: {
       type: "audio",

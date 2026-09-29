@@ -7,7 +7,13 @@ A voice-first agent for cross-border trade: a Chinese export salesperson
 to call, computes a landed-cost quotation, and **speaks the result back** — then
 puts a client-ready English quotation on screen.
 
-**Live demo:** <https://assemblyai-voice-agent-phi.vercel.app/agent>
+**Live demo:** <https://assemblyai-voice-agent-six.vercel.app>
+— the landing page explains the project; the voice agent itself is at
+<https://assemblyai-voice-agent-six.vercel.app/agent>.
+
+**Video (3:59):** [`submission/VoiceQuote-demo.mp4`](submission/VoiceQuote-demo.mp4)
+· **Slides:** [`submission/VoiceQuote-deck.pdf`](submission/VoiceQuote-deck.pdf)
+· **Cover:** [`submission/VoiceQuote-cover.png`](submission/VoiceQuote-cover.png)
 
 ---
 
@@ -35,6 +41,25 @@ Everything above, by voice, in one conversation.
 | Compute the numbers | **Local deterministic engine** (no LLM) |
 | Say the result back | **AssemblyAI Voice Agent API** (TTS) |
 | Show the quotation | Next.js UI |
+
+## Routes
+
+| Path | What it is |
+|---|---|
+| `/` | Landing page — what the project is, how AssemblyAI is used, the measured numbers |
+| `/agent` | **The voice agent.** Mic in, spoken quotation out, document on screen |
+| `/trade` | The same pricing pipeline without a microphone — type the inquiry instead |
+| `/studio` | A general-purpose writing pipeline. Incidental to this submission; kept because the shell is shared |
+
+## Submission artifacts
+
+| File | |
+|---|---|
+| `submission/VoiceQuote-demo.mp4` | 3:59 demo — Chinese narration, burned-in subtitles, scene 4 is unedited session audio |
+| `submission/VoiceQuote-deck.pdf` | 10-slide deck |
+| `submission/VoiceQuote-cover.png` | 1920×1080 cover |
+| `submission/sess_*.timeline.json` | The raw Voice Agent session timeline behind the video's numbers |
+| `submission/lablab-submission.md` | The submission copy |
 
 ## How AssemblyAI is used
 
@@ -135,21 +160,78 @@ denoises).
 
 ## Evidence
 
-Measured against the real HTTP routes on this machine (`next start`, one request
-each, no LLM in the path):
+Everything below was measured, not estimated. The scripts that produced it are in
+the project workspace (`_bench_live.py`, `_e2e_prod.py`, `_verify_live_fix.py`),
+and the raw session timeline is checked in under `submission/`.
 
-| Route | Time | Result |
+### The pricing engine, against the live deployment
+
+Three requests each to the deployed routes, `POST` body `{draft: "<spoken inquiry>"}`:
+
+| Route | Median | Result |
 |---|---|---|
-| `POST /api/quote/analyze` | **0.08 s** | 3 product lines matched, 2 risk flags, `source: "rules"` |
-| `POST /api/quote` | **0.16 s** | a complete **3,924-character** quotation, zero Chinese characters in the client-facing part |
-| `POST /api/quote` (revision) | **0.03 s** | **4,190 characters**, `-R1` + `REVISION NOTICE`, order quantity held at 5,000 while 500 is treated as a sample |
+| `POST /api/quote/analyze` | **981 ms** | 3 product lines matched, 3 risk flags, `category: "IMD 图案壳"` |
+| `POST /api/quote` | **1,130 ms** | a **4,488-character** quotation; **4,241** of those are client-facing and contain **0 Chinese characters** |
 
-- **145 unit tests passing** (`npm test`) covering the quotation generator, the
-  revision parser, the tool contracts, the token route and the publish route.
-- `X-Quote-Source: generated` verified on the wire — the UI badge reads this
-  header rather than assuming.
-- The LLM path this engine replaced took **12.5 s** and returned a
-  **356-character truncation** of a 3,924-character document.
+The deterministic core itself is far below those numbers — the 1-second floor is
+Vercel serverless overhead, not the engine.
+
+### One real voice session, end to end, in production
+
+Session `sess_f7a9f0d689ec4c9d87d38d6bbedd2806` — this is the take used in the
+demo video, and its timeline is checked in at
+`submission/sess_f7a9f0d689ec4c9d87d38d6bbedd2806.timeline.json`.
+
+| | |
+|---|---|
+| `session.ready` | **0.58 s** |
+| Greeting time-to-first-audio | **336 ms** |
+| STT segments for one spoken inquiry | **6** (all six landed in a single turn) |
+| Tool calls | **2 / 2 succeeded**, no timeouts — `analyze_inquiry` 1,392 ms, `generate_quotation` 1,281 ms |
+| Engine output | **4,488 characters**, `X-Quote-Source: generated` |
+| Session duration | **53.6 s** |
+
+The agent's spoken summary named the right product *and* all three risks:
+*"iPhone 16 Pro Max 的图案壳到岸成本是 1 块 4 9 9。要提醒客户目标价差了大概 4 毛钱，
+而且图案产品必须要有授权链，另外运费是按体积重算的"*.
+
+### The quotation document
+
+First data row — the SKU the buyer actually asked for, ranked first:
+
+```
+| IMD Printed Case for iPhone 16 Pro Max | iPhone 16 Pro Max | 5,000 pcs | $1.050 | $5250.00 |
+```
+
+The document carries `## 6. Note on Your Target Price` (states the $0.399/pc gap
+rather than pretending to discount), `## 7. IP & Artwork Clearance`, the
+volumetric-weight basis (`1 cbm ≈ 167 kg`) and the duty rate — and ends with an
+`## Internal Notes — do not forward` section that is the only place Chinese is
+allowed to appear.
+
+### Tests
+
+**176 unit tests across 16 files**, covering the quotation generator, the
+revision parser, Chinese-numeral parsing, the tool contracts, and the token and
+publish routes. `npx vitest run` → 16 passed / 176 passed.
+
+### What the numbers replaced
+
+The first version asked the LLM to write the whole quotation. It took **12.5 s**
+and returned a **356-character truncation** of a 3,924-character document, with
+numbers that drifted between runs. That is why the engine is deterministic and
+the model is confined to listening, routing and speaking.
+
+### Known limitation, stated plainly
+
+The hosted model emits a stray clarifying question ("请告诉我具体的机型、数量和产品要求。")
+*alongside* the `analyze_inquiry` tool call, even when the user has just stated
+everything. This survived five configurations — four prompt rewrites and
+`turn_detection.min_silence` raised from 1800 ms to 3000 ms — so it is a
+model-level behaviour, not something a prompt can fix. The final prompt stops
+fighting it and permits one neutral filler line instead; the take in the video is
+unedited, so you can see it happen.
+
 - Screenshots in [`docs/screenshots/`](docs/screenshots/).
 
 ## Run it

@@ -13,9 +13,10 @@ import type { ReactNode } from "react";
  */
 
 const NAV: { href: string; label: string; hint: string }[] = [
+  { href: "/", label: "总览", hint: "这个项目是什么、AssemblyAI 用在哪" },
   { href: "/agent", label: "语音 Agent", hint: "语音到语音，说话即报价" },
   { href: "/trade", label: "外贸模式", hint: "文字输入，同样一条报价链路" },
-  { href: "/", label: "写作工作台", hint: "通用写作流水线" },
+  { href: "/studio", label: "写作工作台", hint: "通用写作流水线（与本项目无关的附带模块）" },
 ];
 
 function BrandMark() {
@@ -63,7 +64,7 @@ export default function AppShell({
             wide ? "max-w-[1600px]" : "max-w-7xl"
           }`}
         >
-          <Link href="/agent" className="flex items-center gap-2">
+          <Link href="/" className="flex items-center gap-2">
             <BrandMark />
             <span className="text-sm font-semibold tracking-tight text-ink">
               Voice Agent Studio

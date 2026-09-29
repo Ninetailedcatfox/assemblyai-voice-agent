@@ -120,7 +120,7 @@ Productivity
 
 ## 8. Slide presentation
 
-`submission/VoiceQuote-deck.pdf` — 10 页，1440×810，327 KB。
+`submission/VoiceQuote-deck.pdf` — 10 页，1440×810 pt（16:9），328 KB。
 
 ---
 

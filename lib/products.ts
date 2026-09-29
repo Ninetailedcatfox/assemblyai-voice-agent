@@ -13,6 +13,8 @@
  * - ⚠️ IP 侵权是本品类第一大死因：未授权卡通/影视/体育图案，单案赔偿 $2-15 万起
  */
 
+import { compactForMatch, normalizeCnDigits } from "./cnNumber";
+
 export type SkuCategory =
   | "magsafe-case"
   | "imd-case"
@@ -177,7 +179,7 @@ export const CATALOG: Sku[] = [
     productionDays: 14,
     cbmPer1000: 0.5,
     weightKgPer1000: 32,
-    ipClearanceRequired: false,
+    ipClearanceRequired: true,
     tiers: [
       { minQty: 1000, fobUsd: 1.3 },
       { minQty: 5000, fobUsd: 1.05 },
@@ -198,7 +200,7 @@ export const CATALOG: Sku[] = [
     productionDays: 14,
     cbmPer1000: 0.5,
     weightKgPer1000: 32,
-    ipClearanceRequired: false,
+    ipClearanceRequired: true,
     tiers: [
       { minQty: 1000, fobUsd: 1.1 },
       { minQty: 5000, fobUsd: 0.92 },
@@ -219,7 +221,7 @@ export const CATALOG: Sku[] = [
     productionDays: 16,
     cbmPer1000: 0.5,
     weightKgPer1000: 33,
-    ipClearanceRequired: false,
+    ipClearanceRequired: true,
     tiers: [
       { minQty: 500, fobUsd: 1.5 },
       { minQty: 2000, fobUsd: 1.25 },
@@ -240,7 +242,7 @@ export const CATALOG: Sku[] = [
     productionDays: 18,
     cbmPer1000: 0.55,
     weightKgPer1000: 38,
-    ipClearanceRequired: false,
+    ipClearanceRequired: true,
     tiers: [
       { minQty: 500, fobUsd: 1.6 },
       { minQty: 2000, fobUsd: 1.35 },
@@ -488,34 +490,63 @@ export function estimateLandedCost(
 // ── 检索（替代 Tavily 的"产品库检索"层）────────────────────────────────────
 
 /**
+ * 品名/品类里的关键词（长度≥2，已压缩空格）。
+ * 机型名里的词会被剔除 —— 那部分由下面的"机型命中"单独计分，
+ * 两边都算会让"覆盖机型多"的 SKU 白拿双份分。
+ */
+function nameKeywords(sku: Sku): string[] {
+  const modelTokens = sku.models.map((m) => compactForMatch(m));
+  const out = new Set<string>();
+  for (const raw of [sku.nameZh, sku.nameEn, sku.category]) {
+    for (const t of raw.split(/[\s,，、/·()（）\-_]+/)) {
+      const c = compactForMatch(t);
+      // 注意是**包含**判断不是相等判断：机型 "iPhone 16 Pro Max" 压缩后是
+      // "iphone16promax"，而切出来的词是 "iphone"/"16"/"pro"/"max"，
+      // 按相等比一个都剔不掉，机型词会以"品名命中"的身份白拿高分。
+      if (c.length >= 2 && !modelTokens.some((mt) => mt.includes(c))) out.add(c);
+    }
+  }
+  return [...out];
+}
+
+/**
  * 关键词检索。询盘是口述转来的、写法随意，所以做宽松匹配：
  * 机型、品类、中英文名都参与打分。空查询返回全库（供演示）。
  */
 export function searchSkus(query: string, limit = 5): Sku[] {
-  const q = query.trim().toLowerCase();
+  // 中文数字先归一化：口述转写出来的是 "iPhone十六Pro Max"、量词是 "五千个"，
+  // 不换的话检索词一个都命中不了，整张报价单会退化成通用配件（线上实测）。
+  const q = normalizeCnDigits(query).trim().toLowerCase();
   if (!q) return CATALOG.slice(0, limit);
 
+  const qCompact = compactForMatch(q);
+  // 兜底召回用：按空白/标点切出来的检索词。
   const terms = q.split(/[\s,，、/]+/).filter((t) => t.length >= 2);
 
   const scored = CATALOG.map((sku) => {
-    const haystack = [
-      sku.nameZh,
-      sku.nameEn,
-      sku.category,
-      ...sku.models,
-      sku.note,
-    ]
+    const haystack = [sku.nameZh, sku.nameEn, sku.category, ...sku.models, sku.note]
       .join(" ")
       .toLowerCase();
 
     let score = 0;
-    for (const t of terms) if (haystack.includes(t)) score += 2;
-    // 型号精确命中权重更高（询盘里最关键的信息就是机型）
-    for (const m of sku.models) {
-      const ml = m.toLowerCase();
-      if (ml !== "universal" && q.includes(ml)) score += 5;
-    }
-    if (q.includes(sku.id)) score += 5;
+
+    // ① 品名命中 —— 强信号，且必须**反向**查。
+    // 口述转写不给空格，正向按空格切出来的"检索词"会是 "max的im图案壳。" 这种整块，
+    // 永远匹配不上；反过来拿品名自己的关键词去检索串里找才对。
+    // 不这么做，"客户明说了 IMD 图案壳"就会被"机型覆盖更多"的 MagSafe 壳压住 —— 报价报错产品。
+    for (const kw of nameKeywords(sku)) if (qCompact.includes(kw)) score += 4;
+
+    // ② 机型命中只算**一次**：SKU 覆盖几个机型是数据规模，不是匹配度。
+    // 按个给分会让"覆盖 4 个机型"的壳永远压住客户点名要的那款。
+    const modelHit = sku.models.some(
+      (m) => m !== "universal" && qCompact.includes(compactForMatch(m))
+    );
+    if (modelHit) score += 5;
+
+    // ③ 兜底召回：检索词在备注/机型里出现，权重低，只用来兜住长尾询盘
+    for (const t of terms) if (haystack.includes(t)) score += 1;
+
+    if (qCompact.includes(compactForMatch(sku.id))) score += 5;
     return { sku, score };
   });
 

@@ -141,3 +141,39 @@ describe("formatCatalog", () => {
     expect(text).toContain("需 IP 授权链文件");
   });
 });
+
+describe("searchSkus —— 口述转写的两种失真形态", () => {
+  it("中文数字 + 没有空格的机型，也要能排到 IMD 图案壳", () => {
+    // 这是 AssemblyAI 实际转写出来的样子（真实会话 sess_e572afad 的原话）
+    const spoken =
+      "美国一个亚马逊私标卖家。 到五千个iPhone十六Pro Max的IM图案壳。 目标价一点一美元。";
+    expect(searchSkus(spoken, 1)[0].id).toBe("imd-ip16pm");
+  });
+
+  it("标准写法（阿拉伯数字 + 空格）同样排第一，不能为了口述形态牺牲标准写法", () => {
+    const typed =
+      "美国一个亚马逊私标卖家要 5000 个 iPhone 16 Pro Max 的 IMD 图案壳，目标价 $1.1";
+    expect(searchSkus(typed, 1)[0].id).toBe("imd-ip16pm");
+  });
+
+  it("客户明说了品名，不能因为别的 SKU 多覆盖一个机型就被挤下去", () => {
+    // MagSafe 壳覆盖 iPhone 16 / 16 Plus / 16 Pro / 16 Pro Max 四个机型，
+    // 旧打分靠机型分就能把 IMD 挤到第二 —— 于是报价单报的是错的产品。
+    expect(searchSkus("要 iPhone 16 Pro Max 的 IMD 图案壳", 3)[0].id).toBe("imd-ip16pm");
+    expect(searchSkus("要 iPhone 16 Pro Max 的磁吸壳", 3)[0].id).toBe("ms-ip16");
+  });
+});
+
+describe("印刷图案类 SKU 的数据一致性", () => {
+  it("imd-case 品类的每个 SKU 都必须标 ipClearanceRequired", () => {
+    const imd = CATALOG.filter((s) => s.category === "imd-case");
+    expect(imd.length).toBeGreaterThan(0);
+    for (const s of imd) expect(s.ipClearanceRequired).toBe(true);
+  });
+
+  it("名字里带图案/印刷的 SKU 一个都不能漏标（漏了报价单就不出 IP 条款）", () => {
+    const printed = CATALOG.filter((s) => /IMD|图案|Printed/i.test(`${s.nameZh} ${s.nameEn}`));
+    expect(printed.length).toBeGreaterThan(0);
+    for (const s of printed) expect(s.ipClearanceRequired).toBe(true);
+  });
+});

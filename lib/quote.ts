@@ -9,6 +9,7 @@
  * - 报价必须体现本品类的三个坑：体积重计费、美国关税、IP 授权链
  */
 
+import { CN_NUM_CHARS, compactForMatch, normalizeCnDigits, parseCnNumber } from "./cnNumber";
 import type { ChatMessage } from "./llm";
 import { marketNameEn } from "./marketNames";
 import {
@@ -59,6 +60,13 @@ export interface QuoteContext {
   assumptions: QuoteAssumptions;
   /** 目标价与到岸成本的差距（美元/个）；无目标价时为 null */
   targetGapUsd: number | null;
+  /**
+   * `targetGapUsd` 是跟**哪一行**比出来的。
+   * 必须显式带出来：报价单正文要写"我们最好的到岸成本是 $X"，
+   * 如果那边自己再 `reduce` 一次取全局最低，就会拿配件（钢化膜 $0.435）
+   * 去配"客户目标价 $1.1 够不着"这句话 —— 自相矛盾的报价单。
+   */
+  targetBaseline: QuoteLine | null;
   /** 本地规则给出的提醒（不依赖 LLM） */
   flags: string[];
 }
@@ -170,74 +178,11 @@ function extractTimeline(text: string): string {
   return seg?.trim() ?? "";
 }
 
-/** 中文数字用到的字符（含"两"这种口语写法） */
-const CN_NUM_CHARS = "零一二两三四五六七八九十百千万亿";
-
 /**
- * 解析中文数字："五千"→5000、"一万"→10000、"两万"→20000、"一点一"→1.1、"零点九五"→0.95。
- *
- * 为什么必须支持：这条链路是**中文口述**驱动的，AssemblyAI 转写出来的就是
- * "五千个""一点一美元"这种中文数字。旧实现只认阿拉伯数字，于是
- * "五千个"直接落到默认值 1000 —— 实测线上报价单写成 `1,000 pcs`，
- * 而客户口述的是 5,000 个；"一点一美元"也让 targetPriceUsd 变成 null，
- * 连带"目标价够不着"这条最关键的提醒都不出现。数字错，报价单就是废纸。
+ * 中文数字解析已挪到 `lib/cnNumber.ts` —— 产品库检索（`lib/products.ts`）
+ * 也要用它，留在本文件会形成循环依赖。这里 re-export，既有调用方不用改。
  */
-export function parseCnNumber(input: string): number {
-  const D: Record<string, number> = {
-    零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4,
-    五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
-  };
-  const U: Record<string, number> = { 十: 10, 百: 100, 千: 1000 };
-  const s = input.trim();
-  if (!s) return NaN;
-
-  const [intPart, decPart] = s.split("点");
-  let total = 0; // "万/亿"以上已结算的部分
-  let section = 0; // 当前小节（万以下）
-  let num = 0; // 待结算的个位数字
-  let lastUnit = 0; // 最后一个单位，用于处理"一千五 = 1500"这类省略写法
-  let trailingDigit: number | null = null; // 末尾未带单位的数字
-
-  for (const ch of intPart) {
-    if (ch in D) {
-      num = D[ch];
-      trailingDigit = num;
-    } else if (ch in U) {
-      section += (num === 0 ? 1 : num) * U[ch]; // "十五"的十前面省略了"一"
-      num = 0;
-      trailingDigit = null;
-      lastUnit = U[ch];
-    } else if (ch === "万") {
-      total += (section + num) * 10000;
-      section = 0;
-      num = 0;
-      trailingDigit = null;
-      lastUnit = 10000;
-    } else if (ch === "亿") {
-      total = (total + section + num) * 100000000;
-      section = 0;
-      num = 0;
-      trailingDigit = null;
-      lastUnit = 100000000;
-    } else {
-      return NaN; // 混进了非数字字符，宁可放弃也不要猜
-    }
-  }
-
-  let value = total + section + num;
-  // "一千五"(1500)、"一万五"(15000)、"两千三"(2300)：末尾数字省略了单位，
-  // 按最后一个单位的十分之一补。
-  if (trailingDigit !== null && lastUnit >= 100) {
-    value = total + section + trailingDigit * (lastUnit / 10);
-  }
-
-  if (decPart !== undefined) {
-    const digits = [...decPart].map((c) => (c in D ? D[c] : NaN));
-    if (digits.length === 0 || digits.some((d) => Number.isNaN(d))) return NaN;
-    value += parseFloat(`0.${digits.join("")}`);
-  }
-  return value;
-}
+export { parseCnNumber, normalizeCnDigits } from "./cnNumber";
 
 /**
  * 这个中文数字串像不像"采购数量"？
@@ -296,12 +241,15 @@ export function fallbackIntent(draft: string): InquiryIntent {
     if (Number.isFinite(p) && p > 0) targetPriceUsd = p;
   }
 
-  // 机型：直接用产品库里的机型名去命中
-  const lower = text.toLowerCase();
+  // 机型：用产品库里的机型名去命中。两道归一化都必须做，否则口述转写一个都匹配不上：
+  //   1) 中文数字 → 阿拉伯数字（转写出来是 "iPhone十六Pro Max"，不是 "iPhone 16 Pro Max"）
+  //   2) 压掉空格再比（转写常常不给空格，"iPhone16Pro Max"）
+  // 匹配不上的后果不是"少一个字段"，而是整张报价单退化成通用配件 —— 线上实测如此。
+  const matchText = compactForMatch(normalizeCnDigits(text));
   const models = Array.from(
     new Set(
       CATALOG.flatMap((s) => s.models).filter(
-        (m) => m !== "universal" && lower.includes(m.toLowerCase())
+        (m) => m !== "universal" && matchText.includes(compactForMatch(m))
       )
     )
   );
@@ -346,13 +294,21 @@ export function buildQuoteContext(
     cost: estimateLandedCost(sku, intent.quantity, assumptions),
   }));
 
-  const cheapest = lines.length
-    ? lines.reduce((a, b) => (a.cost.landedUnit <= b.cost.landedUnit ? a : b))
+  // 目标价是客户对**他要的那个产品**说的，所以缺口只能跟"同类"的最优到岸成本比。
+  // 拿报价单里凑数的配件比会直接抹掉最关键的那条提醒：实测给 IMD 图案壳的询盘里
+  // 混进一张 $0.435 的钢化膜，缺口就从 +$0.40 变成 -$0.66，
+  // "目标价够不着"整段消失 —— 而客户要的那款其实差得很远。
+  // 同类 = 最匹配那一行（lines[0]）的品类码。
+  const primaryCategory = lines[0]?.sku.category;
+  const comparable = lines.filter((l) => l.sku.category === primaryCategory);
+  const pool = comparable.length ? comparable : lines;
+  const baseline = pool.length
+    ? pool.reduce((a, b) => (a.cost.landedUnit <= b.cost.landedUnit ? a : b))
     : null;
 
   const targetGapUsd =
-    intent.targetPriceUsd !== null && cheapest
-      ? cheapest.cost.landedUnit - intent.targetPriceUsd
+    intent.targetPriceUsd !== null && baseline
+      ? baseline.cost.landedUnit - intent.targetPriceUsd
       : null;
 
   // 本地规则提醒：不依赖 LLM，保证关键风险一定会出现在报价里
@@ -363,9 +319,9 @@ export function buildQuoteContext(
   if (lines.some((l) => l.sku.ipClearanceRequired)) {
     flags.push("涉及图案类产品：必须提供授权链文件，否则不得报价（本品类第一大死因）");
   }
-  if (targetGapUsd !== null && targetGapUsd > 0) {
+  if (targetGapUsd !== null && targetGapUsd > 0 && baseline) {
     flags.push(
-      `客户目标价 $${intent.targetPriceUsd} 低于最优到岸成本 $${cheapest!.cost.landedUnit.toFixed(3)}，` +
+      `客户目标价 $${intent.targetPriceUsd} 低于同类最优到岸成本 $${baseline.cost.landedUnit.toFixed(3)}，` +
         `差 $${targetGapUsd.toFixed(3)}/个 —— 必须客观说明，不要假装能降价`
     );
   }
@@ -380,6 +336,7 @@ export function buildQuoteContext(
     catalogText: formatCatalog(skus, assumptions),
     assumptions,
     targetGapUsd,
+    targetBaseline: baseline,
     flags,
   };
 }
@@ -467,6 +424,15 @@ export function summarizeContext(ctx: QuoteContext) {
     intent: ctx.intent,
     flags: ctx.flags,
     targetGapUsd: ctx.targetGapUsd,
+    // 缺口是跟哪一行比出来的 —— 前端要能说清"低于**哪款**的到岸成本"，
+    // 否则用户看到"目标价低于最优到岸成本 $1.499"会去找报价单里 $0.435 那行。
+    targetBaseline: ctx.targetBaseline
+      ? {
+          id: ctx.targetBaseline.sku.id,
+          nameZh: ctx.targetBaseline.sku.nameZh,
+          landedUnit: ctx.targetBaseline.cost.landedUnit,
+        }
+      : null,
     assumptions: ctx.assumptions,
     lines: ctx.lines.map((l) => ({
       id: l.sku.id,

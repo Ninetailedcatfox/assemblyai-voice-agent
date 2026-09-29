@@ -43,6 +43,8 @@ interface Analysis {
   intent: Intent;
   flags: string[];
   targetGapUsd: number | null;
+  /** 缺口是跟哪一行比出来的（同类最优），用于把提示写清楚 */
+  targetBaseline: { id: string; nameZh: string; landedUnit: number } | null;
   assumptions: { freightMode: "sea" | "air"; freightRate: number; dutyRate: number };
   lines: QuoteLineSummary[];
 }
@@ -441,7 +443,9 @@ export default function TradePage() {
 
                 {analysis.targetGapUsd !== null && analysis.targetGapUsd > 0 && (
                   <p className="mt-2 rounded-lg bg-warn-soft px-2 py-1.5 text-[11px] text-warn">
-                    客户目标价低于最优到岸成本 {usd(analysis.targetGapUsd)}/个 —— 报价里必须客观说明
+                    客户目标价低于
+                    {analysis.targetBaseline ? `「${analysis.targetBaseline.nameZh}」` : "同类"}最优到岸成本{" "}
+                    {usd(analysis.targetGapUsd)}/个 —— 报价里必须客观说明
                   </p>
                 )}
               </div>

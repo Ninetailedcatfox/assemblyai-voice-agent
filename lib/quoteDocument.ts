@@ -188,14 +188,17 @@ export function buildQuoteDocument(
 
   // ── 6. 目标价说明（仅当客户目标价够不着时）────────────────────────────
   if (targetGapUsd !== null && targetGapUsd > 0) {
-    const cheapest = lines.reduce((x, y) =>
-      x.cost.landedUnit <= y.cost.landedUnit ? x : y
-    );
+    // 必须用 ctx.targetBaseline（和 targetGapUsd 同源），不能在这里重新 reduce：
+    // 重新取全局最低会拿配件去配这句话，写出"我们最好的到岸成本是 $0.435"
+    // 却同时说"你的目标价 $1.1 够不着" —— 自相矛盾。
+    const baseline =
+      ctx.targetBaseline ??
+      lines.reduce((x, y) => (x.cost.landedUnit <= y.cost.landedUnit ? x : y));
     nextSection("Note on Your Target Price");
     out.push("");
     out.push(
       `Your target of ${usd(intent.targetPriceUsd!, 2)}/pc is below our best landed cost of ` +
-        `${usd(cheapest.cost.landedUnit)}/pc — a gap of **${usd(targetGapUsd)}/pc**. ` +
+        `${usd(baseline.cost.landedUnit)}/pc for this specification — a gap of **${usd(targetGapUsd)}/pc**. ` +
         "We cannot match it without changing one of the following:"
     );
     out.push("");
@@ -255,7 +258,7 @@ export function buildQuoteDocument(
   for (const f of flags) out.push(`- ${f}`);
   if (targetGapUsd !== null && targetGapUsd <= 0) {
     out.push(
-      `- Target price ${usd(intent.targetPriceUsd!, 2)}/pc is achievable; headroom vs. best landed cost is ${usd(
+      `- Target price ${usd(intent.targetPriceUsd!, 2)}/pc is achievable; headroom vs. the best landed cost for this specification is ${usd(
         Math.abs(targetGapUsd)
       )}/pc.`
     );

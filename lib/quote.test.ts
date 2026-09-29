@@ -185,14 +185,31 @@ describe("buildQuoteContext", () => {
     expect(line.cost.landedUnit).toBeGreaterThan(line.cost.fobUnit);
   });
 
-  it("目标价低于到岸成本时算出差距（差距 = 最优到岸成本 − 目标价）", () => {
-    // 注意：5000 个时最优到岸成本约 $0.44/个（钢化膜），所以目标价要压到 0.05 才算真的做不到
+  it("目标价低于到岸成本时算出差距（差距 = 同类最优到岸成本 − 目标价）", () => {
     const ctx = buildQuoteContext(baseIntent({ targetPriceUsd: 0.05 }));
-    const cheapest = Math.min(...ctx.lines.map((l) => l.cost.landedUnit));
+    expect(ctx.targetBaseline).not.toBeNull();
+    // 基准必须是"客户要的那类"（IMD 图案壳），不是报价单里最便宜的那张配件
+    const pool = ctx.lines.filter((l) => l.sku.category === ctx.lines[0].sku.category);
+    const sameSpec = Math.min(...pool.map((l) => l.cost.landedUnit));
     expect(ctx.targetGapUsd).not.toBeNull();
-    expect(ctx.targetGapUsd!).toBeCloseTo(cheapest - 0.05, 10);
+    expect(ctx.targetGapUsd!).toBeCloseTo(sameSpec - 0.05, 10);
     expect(ctx.targetGapUsd!).toBeGreaterThan(0);
-    expect(ctx.flags.some((f) => f.includes("低于最优到岸成本"))).toBe(true);
+    expect(ctx.flags.some((f) => f.includes("低于同类最优到岸成本"))).toBe(true);
+  });
+
+  it("报价单里混进便宜配件，不能把「目标价够不着」这条提醒抹掉", () => {
+    // 实测踩过：给 IMD 图案壳的询盘里混进一张 $0.435 的钢化膜，
+    // 缺口从正数变成负数，整段提醒消失 —— 而客户要的那款差得远。
+    // 旧实现拿"全局最低"当基准，于是要靠 $0.05 这种荒唐目标价才能触发提醒。
+    const spoken =
+      "美国一个亚马逊私标卖家，要 5000 个 iPhone 16 Pro Max 的 IMD 图案壳，" +
+      "目标价 $1.1，希望两周内能到美仓。";
+    const ctx = buildQuoteContext(fallbackIntent(spoken));
+    const globalCheapest = Math.min(...ctx.lines.map((l) => l.cost.landedUnit));
+    expect(globalCheapest).toBeLessThan(1.1); // 确实有比目标价还便宜的配件混进来
+    expect(ctx.targetBaseline!.sku.id).toBe("imd-ip16pm"); // 但基准必须是客户要的那款
+    expect(ctx.targetGapUsd!).toBeGreaterThan(0); // 缺口仍为正 → 提醒照常出现
+    expect(ctx.flags.some((f) => f.includes("目标价"))).toBe(true);
   });
 
   it("目标价其实能做到时，差距为负且不触发「做不到」提醒", () => {
@@ -299,5 +316,46 @@ describe("summarizeContext", () => {
     expect(s.lines[0]).toHaveProperty("volumetricKg");
     expect(JSON.stringify(s)).not.toContain("【产品库");
     expect(s.flags.length).toBeGreaterThan(0);
+  });
+});
+
+describe("机型匹配 —— 口述转写的失真形态（线上实测踩过）", () => {
+  it("中文数字机型 iPhone十六Pro Max 能匹配到产品库机型", () => {
+    const intent = fallbackIntent("美国私标卖家要五千个iPhone十六Pro Max的IMD图案壳");
+    expect(intent.models).toContain("iPhone 16 Pro Max");
+    expect(intent.models).not.toEqual(["universal"]);
+  });
+
+  it("没有空格的机型 iPhone16Pro Max 也能匹配", () => {
+    const intent = fallbackIntent("要 5000 个 iPhone16Pro Max 的磁吸壳");
+    expect(intent.models).toContain("iPhone 16 Pro Max");
+  });
+
+  it("整句 STT 原话：机型/数量/目标价/IP 一次全中", () => {
+    const spoken =
+      "美国一个亚马逊私标卖家。 到五千个iPhone十六Pro Max的IM图案壳。 " +
+      "目标价一点一美元。 希望两周内能到美仓。 能不能做？";
+    const intent = fallbackIntent(spoken);
+    expect(intent.models).toContain("iPhone 16 Pro Max");
+    expect(intent.quantity).toBe(5000);
+    expect(intent.targetPriceUsd).toBe(1.1);
+    expect(intent.needIpClearance).toBe(true);
+  });
+
+  it("机型匹配失败会让报价单丢掉 IP 条款 —— 用这条守住不回归", () => {
+    const spoken =
+      "美国一个亚马逊私标卖家。 到五千个iPhone十六Pro Max的IM图案壳。 目标价一点一美元。";
+    const ctx = buildQuoteContext(fallbackIntent(spoken));
+    expect(ctx.lines.some((l) => l.sku.ipClearanceRequired)).toBe(true);
+    // 报的必须真是 IMD 图案壳，不是"反正都是壳"
+    expect(ctx.lines[0].sku.id).toBe("imd-ip16pm");
+  });
+
+  it("目标价够不着时缺口为正（$1.1 对 5000 个 IMD 壳）", () => {
+    const spoken =
+      "美国一个亚马逊私标卖家。 到五千个iPhone十六Pro Max的IM图案壳。 目标价一点一美元。";
+    const ctx = buildQuoteContext(fallbackIntent(spoken));
+    expect(ctx.targetGapUsd).not.toBeNull();
+    expect(ctx.targetGapUsd!).toBeGreaterThan(0);
   });
 });

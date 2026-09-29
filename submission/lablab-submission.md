@@ -1,6 +1,7 @@
 # lablab.ai 提交文案 — AssemblyAI Voice Agent Hackathon
 
-> 截止：**2026-09-30 15:00 UTC = 北京时间 23:00**（官网写的是 Sep 30 7:00 PM Gulf Standard Time，UTC+4）。
+> 截止：**2026-09-30 23:00 北京时间**（官网倒计时 chip 原文："Submission deadline Sep 30, 11:00 PM CST"；
+> 活动页 hero 卡写 "ONLINE PHASE 30 SEPTEMBER, 2026"）。赛事窗口 Sep 1 – Sep 30。
 > 提交页字段：Project title / Short description / Long description / Technology & category tags /
 > Cover image / Video presentation / Slide presentation / Public GitHub repository /
 > Demo application platform / Application URL。
@@ -114,9 +115,9 @@ Productivity
 
 ## 7. Video presentation
 
-`submission/VoiceQuote-demo.mp4` — 239 秒（3 分 59 秒），10.6 MB。
+`submission/VoiceQuote-demo.mp4` — 239 秒（3 分 59 秒），10.8 MB（11,317,369 字节）。
 限制是 **<5 分钟且 <300 MB**，两条都满足。
-全程中文旁白 + 烧录字幕；第 4 幕是**未经剪辑的真实会话原声**。
+全程中文旁白 + **中英双语烧录字幕**（英文评委也能跟）；第 4 幕是**未经剪辑的真实会话原声**。
 
 ## 8. Slide presentation
 

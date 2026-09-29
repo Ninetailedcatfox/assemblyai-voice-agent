@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   buildQuoteContext,
   fallbackIntent,
+  parseCnNumber,
   parseInquiry,
   quoteMessages,
   quoteRevisionMessages,
@@ -104,6 +105,71 @@ describe("fallbackIntent（无 LLM 时的本地规则解析）", () => {
     expect(intent.quantity).toBe(1000);
     expect(intent.models).toEqual(["universal"]);
     expect(intent.incoterm).toBe("FOB");
+  });
+});
+
+/**
+ * 中文数字解析。
+ *
+ * 这组用例是回归防线：语音链路转写出来的就是中文数字，旧实现只认阿拉伯数字，
+ * 导致线上报价单把客户口述的"五千个"写成 1,000 pcs、"一点一美元"直接丢失。
+ */
+describe("parseCnNumber（中文数字）", () => {
+  it("基本单位", () => {
+    expect(parseCnNumber("五")).toBe(5);
+    expect(parseCnNumber("十五")).toBe(15);
+    expect(parseCnNumber("五十")).toBe(50);
+    expect(parseCnNumber("五千")).toBe(5000);
+    expect(parseCnNumber("五百")).toBe(500);
+  });
+
+  it("万 / 亿", () => {
+    expect(parseCnNumber("一万")).toBe(10000);
+    expect(parseCnNumber("两万")).toBe(20000);
+    expect(parseCnNumber("两万五")).toBe(25000);
+    expect(parseCnNumber("一万二千")).toBe(12000);
+    expect(parseCnNumber("一亿")).toBe(100000000);
+  });
+
+  it("口语省略单位：一千五 = 1500、两千三 = 2300", () => {
+    expect(parseCnNumber("一千五")).toBe(1500);
+    expect(parseCnNumber("两千三")).toBe(2300);
+    expect(parseCnNumber("一万五")).toBe(15000);
+  });
+
+  it("小数（「点」）", () => {
+    expect(parseCnNumber("一点一")).toBeCloseTo(1.1, 10);
+    expect(parseCnNumber("零点九五")).toBeCloseTo(0.95, 10);
+    expect(parseCnNumber("二点五")).toBeCloseTo(2.5, 10);
+  });
+
+  it("混入非数字字符时返回 NaN，不瞎猜", () => {
+    expect(Number.isNaN(parseCnNumber("五千个"))).toBe(true);
+    expect(Number.isNaN(parseCnNumber("abc"))).toBe(true);
+    expect(Number.isNaN(parseCnNumber(""))).toBe(true);
+  });
+});
+
+describe("fallbackIntent 认中文数字（语音转写的真实形态）", () => {
+  it("口述询盘：五千个 + 一点一美元", () => {
+    const intent = fallbackIntent(
+      "美国一个亚马逊私标卖家，要五千个 iPhone 16 Pro Max 的 IMD 图案壳，" +
+        "目标价一点一美元，希望两周内能到美仓，问能不能做。"
+    );
+    // "美国一个" 里的 "一个" 不能被当成数量
+    expect(intent.quantity).toBe(5000);
+    expect(intent.targetPriceUsd).toBeCloseTo(1.1, 10);
+    expect(intent.buyerMarket).toBe("美国");
+  });
+
+  it("中文「万」与小数价", () => {
+    expect(fallbackIntent("要两万个磁吸壳").quantity).toBe(20000);
+    expect(fallbackIntent("客户给零点九五美元").targetPriceUsd).toBeCloseTo(0.95, 10);
+  });
+
+  it("阿拉伯数字的老路径没被破坏", () => {
+    expect(fallbackIntent("要 5000 个磁吸壳").quantity).toBe(5000);
+    expect(fallbackIntent("目标价 $1.2").targetPriceUsd).toBe(1.2);
   });
 });
 

@@ -170,6 +170,86 @@ function extractTimeline(text: string): string {
   return seg?.trim() ?? "";
 }
 
+/** 中文数字用到的字符（含"两"这种口语写法） */
+const CN_NUM_CHARS = "零一二两三四五六七八九十百千万亿";
+
+/**
+ * 解析中文数字："五千"→5000、"一万"→10000、"两万"→20000、"一点一"→1.1、"零点九五"→0.95。
+ *
+ * 为什么必须支持：这条链路是**中文口述**驱动的，AssemblyAI 转写出来的就是
+ * "五千个""一点一美元"这种中文数字。旧实现只认阿拉伯数字，于是
+ * "五千个"直接落到默认值 1000 —— 实测线上报价单写成 `1,000 pcs`，
+ * 而客户口述的是 5,000 个；"一点一美元"也让 targetPriceUsd 变成 null，
+ * 连带"目标价够不着"这条最关键的提醒都不出现。数字错，报价单就是废纸。
+ */
+export function parseCnNumber(input: string): number {
+  const D: Record<string, number> = {
+    零: 0, 一: 1, 二: 2, 两: 2, 三: 3, 四: 4,
+    五: 5, 六: 6, 七: 7, 八: 8, 九: 9,
+  };
+  const U: Record<string, number> = { 十: 10, 百: 100, 千: 1000 };
+  const s = input.trim();
+  if (!s) return NaN;
+
+  const [intPart, decPart] = s.split("点");
+  let total = 0; // "万/亿"以上已结算的部分
+  let section = 0; // 当前小节（万以下）
+  let num = 0; // 待结算的个位数字
+  let lastUnit = 0; // 最后一个单位，用于处理"一千五 = 1500"这类省略写法
+  let trailingDigit: number | null = null; // 末尾未带单位的数字
+
+  for (const ch of intPart) {
+    if (ch in D) {
+      num = D[ch];
+      trailingDigit = num;
+    } else if (ch in U) {
+      section += (num === 0 ? 1 : num) * U[ch]; // "十五"的十前面省略了"一"
+      num = 0;
+      trailingDigit = null;
+      lastUnit = U[ch];
+    } else if (ch === "万") {
+      total += (section + num) * 10000;
+      section = 0;
+      num = 0;
+      trailingDigit = null;
+      lastUnit = 10000;
+    } else if (ch === "亿") {
+      total = (total + section + num) * 100000000;
+      section = 0;
+      num = 0;
+      trailingDigit = null;
+      lastUnit = 100000000;
+    } else {
+      return NaN; // 混进了非数字字符，宁可放弃也不要猜
+    }
+  }
+
+  let value = total + section + num;
+  // "一千五"(1500)、"一万五"(15000)、"两千三"(2300)：末尾数字省略了单位，
+  // 按最后一个单位的十分之一补。
+  if (trailingDigit !== null && lastUnit >= 100) {
+    value = total + section + trailingDigit * (lastUnit / 10);
+  }
+
+  if (decPart !== undefined) {
+    const digits = [...decPart].map((c) => (c in D ? D[c] : NaN));
+    if (digits.length === 0 || digits.some((d) => Number.isNaN(d))) return NaN;
+    value += parseFloat(`0.${digits.join("")}`);
+  }
+  return value;
+}
+
+/**
+ * 这个中文数字串像不像"采购数量"？
+ *
+ * 必须过滤：口述里 "美国一个亚马逊私标卖家" 的 "一个" 会先被正则命中，
+ * 若直接采信就把数量变成 1。规则是"长度≥2 或含单位"，所以 "一" 被挡掉、
+ * "五千"/"一万"/"十五" 通过。
+ */
+function looksLikeQuantity(cn: string): boolean {
+  return cn.length >= 2 || /[十百千万亿]/.test(cn);
+}
+
 /**
  * 本地规则解析（无 LLM key 时的兜底）。
  * 只求"能跑通演示"，不追求语义理解 —— 有 LLM 时优先用模型结果。
@@ -179,20 +259,40 @@ export function fallbackIntent(draft: string): InquiryIntent {
 
   const market = MARKET_HINTS.find((h) => h.re.test(text));
 
-  // 数量：优先匹配 "5000个 / 5,000 pcs / 1万个"
+  // 数量：阿拉伯数字与中文数字都要认 —— 语音转写出来的是"五千个"这种中文数字。
+  //
+  // 不能只取第一个匹配："美国一个亚马逊私标卖家，要五千个…" 里第一个被命中的是
+  // "一个"。所以把所有候选收齐、过滤掉不合理的（`looksLikeQuantity`），取最大的那个。
   let quantity = 1000;
-  const wan = text.match(/(\d+(?:\.\d+)?)\s*万\s*(?:个|件|pcs)?/i);
-  const plain = text.match(/(\d[\d,]{2,})\s*(?:个|件|pcs|pieces)/i);
-  if (wan) quantity = Math.round(parseFloat(wan[1]) * 10000);
-  else if (plain) quantity = parseInt(plain[1].replace(/,/g, ""), 10);
-  if (!Number.isFinite(quantity) || quantity <= 0) quantity = 1000;
+  const qtyCandidates: number[] = [];
+  for (const m of text.matchAll(/(\d+(?:\.\d+)?)\s*万\s*(?:个|件|pcs)?/gi)) {
+    qtyCandidates.push(Math.round(parseFloat(m[1]) * 10000));
+  }
+  for (const m of text.matchAll(/(\d[\d,]{1,})\s*(?:个|件|pcs|pieces)/gi)) {
+    qtyCandidates.push(parseInt(m[1].replace(/,/g, ""), 10));
+  }
+  for (const m of text.matchAll(
+    new RegExp(`([${CN_NUM_CHARS}]{1,8})\\s*(?:个|件|pcs|pieces)`, "gi")
+  )) {
+    if (!looksLikeQuantity(m[1])) continue;
+    const v = parseCnNumber(m[1]);
+    if (Number.isFinite(v) && v > 0) qtyCandidates.push(v);
+  }
+  const usableQty = qtyCandidates.filter((v) => Number.isFinite(v) && v > 0);
+  if (usableQty.length) quantity = Math.max(...usableQty);
 
-  // 目标价：$1.2 / 1.2美元 / 1.2 USD
+  // 目标价：$1.2 / 1.2美元 / 1.2 USD / 一点一美元 / 零点九五美元
   let targetPriceUsd: number | null = null;
-  const price =
+  const priceAr =
     text.match(/\$\s*(\d+(?:\.\d+)?)/) ?? text.match(/(\d+(?:\.\d+)?)\s*(?:美元|美金|usd)/i);
-  if (price) {
-    const p = parseFloat(price[1]);
+  const priceCn = text.match(
+    new RegExp(`([${CN_NUM_CHARS}]{1,8}(?:点[${CN_NUM_CHARS}]{1,4})?)\\s*(?:美元|美金)`, "i")
+  );
+  if (priceAr) {
+    const p = parseFloat(priceAr[1]);
+    if (Number.isFinite(p) && p > 0) targetPriceUsd = p;
+  } else if (priceCn) {
+    const p = parseCnNumber(priceCn[1]);
     if (Number.isFinite(p) && p > 0) targetPriceUsd = p;
   }
 
